@@ -21,8 +21,8 @@ dependency. Do not use pip, poetry, conda or a `requirements.txt`.
 
 ## Checks
 
-Run these before you open a pull request. CI runs the same commands on
-Python 3.11 to 3.15.
+Run these before you open a pull request. CI runs pytest on Python 3.11 to
+3.15 and the other checks on Python 3.15.
 
 ```bash
 uv run pytest
@@ -111,16 +111,18 @@ This applies to documentation, docstrings and comments.
 ## Compatibility with gepa
 
 - gepa is a dependency. A change to gepa-guard must not need a change to gepa.
-- Use only the public gepa API.
-- Only `gepa_guard._compat` imports from gepa.
+- Library code in `src/gepa_guard` does not import gepa. It reads gepa objects
+  by their attributes.
+- Tests may import gepa. They use only its public API.
 - Every change must work on the oldest supported gepa and on the newest. It
   must work whether or not gepa ships
   `gepa.strategies.acceptance.NonRegressionAcceptance`.
 
 ## Public API and versions
 
-- The public API is the names in `gepa_guard.__all__`. Other names start with
-  `_`.
+- Only the names in `gepa_guard.__all__` are public. Import them from
+  `gepa_guard`, not from its modules.
+- Modules, functions and attributes whose names start with `_` are private.
 - The project uses [semantic versioning](https://semver.org/).
 - A change that users can see needs an entry under "Unreleased" in
   `CHANGELOG.md`.

@@ -8,6 +8,16 @@ class TestPublicApi:
     def test_version_matches_distribution(self) -> None:
         assert gepa_guard.__version__ == metadata.version("gepa-guard")
 
+    def test_exports_are_stable(self) -> None:
+        assert sorted(gepa_guard.__all__) == [
+            "FloorConfig",
+            "FloorRegression",
+            "GuardedAcceptance",
+            "ProtectedFloor",
+            "Regression",
+            "VetoStats",
+        ]
+
     def test_all_names_resolve(self) -> None:
         assert all(hasattr(gepa_guard, name) for name in gepa_guard.__all__)
 
