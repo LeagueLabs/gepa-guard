@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "sunday"
+      time: "18:00"
+    cooldown:
+      default-days: 7
+    groups:
+      all-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "saturday"
+      time: "18:00"
+    groups:
+      main:
+        patterns: ["*"]
+        dependency-type: "production"
+      dev:
+        patterns: ["*"]
+        dependency-type: "development"
+    commit-message:
+      prefix: "build"

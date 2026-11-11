@@ -1,0 +1,46 @@
+name: Upstream gepa
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test against gepa ${{ matrix.ref }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ref: main
+            needs-rule: false
+          - ref: refs/pull/531/head
+            needs-rule: true
+    env:
+      GEPA_REQUIREMENT: gepa @ git+https://github.com/gepa-ai/gepa@${{ matrix.ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - name: Confirm that this gepa has NonRegressionAcceptance
+        if: matrix.needs-rule
+        run: >-
+          uv run --no-sync --with "$GEPA_REQUIREMENT" python -c
+          "from gepa.strategies.acceptance import NonRegressionAcceptance"
+
+      - run: uv run --no-sync --with "$GEPA_REQUIREMENT" pytest

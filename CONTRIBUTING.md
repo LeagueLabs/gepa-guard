@@ -105,7 +105,9 @@ This applies to documentation, docstrings and comments.
 - Add it with `uv add` or `uv add --dev`. Commit `uv.lock` with the change.
 - Do not pin versions in `pyproject.toml`. `uv.lock` records exact versions.
   The lower bound on gepa is the one exception. It names the oldest gepa
-  release this library supports.
+  release this library supports. When you change it, change the
+  `gepa==0.1.4` pin of the `lowest` test jobs in `.github/workflows/ci.yml`
+  too.
 - The project supports Python 3.11 to 3.15.
 
 ## Compatibility with gepa
@@ -132,8 +134,8 @@ This applies to documentation, docstrings and comments.
 - Use [conventional commits](https://www.conventionalcommits.org/): `feat`,
   `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`.
 - Keep one change per pull request.
-- The pull request description has a short summary of the intent and a
-  "Changes in this PR" list.
+- Fill in the pull request template: the issue it fixes, the description
+  and list of changes, the AI disclosure and the checklist.
 - Pull requests are squash merged. The squash message summarises what landed.
 - Pin GitHub Actions to a full commit SHA, with the tag as a trailing comment.
 
@@ -150,5 +152,5 @@ ready to explain it in review.
 
 ## Security
 
-Do not report a vulnerability in a public issue. Use GitHub private
-vulnerability reporting on this repository.
+Do not report a vulnerability in a public issue. Follow
+[SECURITY.md](SECURITY.md).

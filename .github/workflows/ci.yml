@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint, format and types
+    name: Lint, format, types and lock
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,18 +25,20 @@ jobs:
         with:
           enable-cache: true
 
+      - run: uv lock --check
       - run: uv sync --locked
       - run: uv run --no-sync ruff check . --output-format=github
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync ty check
 
   test:
-    name: Test on Python ${{ matrix.python-version }}
+    name: Test on Python ${{ matrix.python-version }} with ${{ matrix.gepa }} gepa
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        gepa: [lowest, latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,5 +49,42 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
 
-      - run: uv sync --locked
-      - run: uv run --no-sync pytest
+      - name: Install the locked dependencies
+        if: matrix.gepa == 'lowest'
+        run: uv sync --locked
+
+      - name: Install the dependencies with the latest gepa
+        if: matrix.gepa == 'latest'
+        run: uv sync --upgrade-package gepa
+
+      - name: Test with gepa 0.1.4
+        if: matrix.gepa == 'lowest'
+        run: |
+          uv run --no-sync --with gepa==0.1.4 python -c "from importlib.metadata import version; print('gepa', version('gepa'))"
+          uv run --no-sync --with gepa==0.1.4 pytest
+
+      - name: Test with the latest gepa
+        if: matrix.gepa == 'latest'
+        run: |
+          uv run --no-sync python -c "from importlib.metadata import version; print('gepa', version('gepa'))"
+          uv run --no-sync pytest
+
+  build:
+    name: Build and check the distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          enable-cache: true
+
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+      - name: Import the wheel and find py.typed
+        run: >-
+          uv run --isolated --no-project --with dist/*.whl python -c
+          "from importlib.resources import files; import gepa_guard;
+          assert files('gepa_guard').joinpath('py.typed').is_file()"
