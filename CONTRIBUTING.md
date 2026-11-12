@@ -3,6 +3,8 @@
 Thank you for your interest in gepa-guard. This guide tells you how to set up
 the project, which rules a change must follow and how to send it.
 
+Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 For a large change, open an issue first. Agree on the approach before you
 write the code.
 
@@ -154,3 +156,8 @@ ready to explain it in review.
 
 Do not report a vulnerability in a public issue. Follow
 [SECURITY.md](SECURITY.md).
+
+## License
+
+gepa-guard is released under the [MIT license](LICENSE). By contributing, you
+agree that your contributions are released under the same license.

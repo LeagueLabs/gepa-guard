@@ -83,8 +83,12 @@ jobs:
 
       - run: uv build
       - run: uvx twine check --strict dist/*
-      - name: Import the wheel and find py.typed
+      - name: Install the wheel and check py.typed and the license
         run: >-
           uv run --isolated --no-project --with dist/*.whl python -c
-          "from importlib.resources import files; import gepa_guard;
-          assert files('gepa_guard').joinpath('py.typed').is_file()"
+          "from importlib.metadata import distribution;
+          from importlib.resources import files;
+          wheel = distribution('gepa-guard');
+          assert files('gepa_guard').joinpath('py.typed').is_file(), 'py.typed is missing';
+          assert wheel.metadata.get('License-Expression') == 'MIT', 'the license is not MIT';
+          assert any(str(f).endswith('licenses/LICENSE') for f in wheel.files), 'LICENSE is missing'"

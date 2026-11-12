@@ -14,3 +14,4 @@ All notable changes to this project are listed here. The format follows
   minibatch against a reference candidate.
 - `VetoStats`, `Regression` and `FloorRegression`. They record what the guard
   found and decided.
+- The MIT license.
