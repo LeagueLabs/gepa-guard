@@ -1,5 +1,6 @@
 """Protected checks on rows outside the minibatch."""
 
+import threading
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ class FloorConfig:
 class ProtectedFloor:
     """Protected checks a reference candidate passed, checked again for each candidate.
 
+    Calls from several threads run one at a time.
+
     Parameters
     ----------
     evaluate : callable
@@ -73,6 +76,7 @@ class ProtectedFloor:
         self._failures: Counter[int] = Counter()
         self._cache: dict[str, tuple[FloorRegression, ...]] = {}
         self._evaluations = 0
+        self._lock = threading.Lock()
 
     @property
     def measured(self) -> bool:
@@ -106,22 +110,15 @@ class ProtectedFloor:
         -------
         dict of str to int
             Recorded cases per protected check.
+
+        Raises
+        ------
+        ValueError
+            If the reference passes no row of a protected check. The floor
+            then keeps its earlier state.
         """
-        required: dict[int, tuple[str, ...]] = {}
-        for index, row in enumerate(self._rows):
-            objectives = self._score(row, reference)
-            passed = tuple(
-                name for name in self.protected if is_pass(objectives.get(name))
-            )
-            if passed:
-                required[index] = passed
-        self._required = required
-        self._failures.clear()
-        self._cache.clear()
-        return {
-            name: sum(name in checks for checks in required.values())
-            for name in self.protected
-        }
+        with self._lock:
+            return self._measure(reference)
 
     def regressions(self, candidate: Mapping[str, str]) -> tuple[FloorRegression, ...]:
         """Return the protected checks the reference passed and the candidate fails.
@@ -145,6 +142,36 @@ class ProtectedFloor:
         RuntimeError
             If `measure` was not called first.
         """
+        with self._lock:
+            return self._regressions(candidate)
+
+    def _measure(self, reference: Mapping[str, str]) -> dict[str, int]:
+        """Score every row with the reference and record the checks it passed."""
+        required: dict[int, tuple[str, ...]] = {}
+        for index, row in enumerate(self._rows):
+            objectives = self._score(row, reference)
+            passed = tuple(
+                name for name in self.protected if is_pass(objectives.get(name))
+            )
+            if passed:
+                required[index] = passed
+        counts = {
+            name: sum(name in checks for checks in required.values())
+            for name in self.protected
+        }
+        missing = ", ".join(repr(name) for name, count in counts.items() if not count)
+        if missing:
+            raise ValueError(
+                f"the reference passed no row of {missing}. "
+                "Check the protected names and the evaluate function."
+            )
+        self._required = required
+        self._failures.clear()
+        self._cache.clear()
+        return counts
+
+    def _regressions(self, candidate: Mapping[str, str]) -> tuple[FloorRegression, ...]:
+        """Return the regressions of a candidate, from the cache when possible."""
         if self._required is None:
             raise RuntimeError("call measure() with a reference candidate first")
         key = candidate_fingerprint(candidate)

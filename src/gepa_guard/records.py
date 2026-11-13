@@ -55,8 +55,10 @@ class VetoStats:
         Proposals rejected for a protected regression in the floor.
     vetoed_by_base : int
         Proposals rejected by the base criterion.
-    checks : collections.Counter
-        Protected regressions found, per check.
+    checked : collections.Counter
+        Protected passes of the parent compared in the minibatch, per check.
+    regressed : collections.Counter
+        Protected regressions found in the minibatch or the floor, per check.
     """
 
     proposals: int = 0
@@ -65,7 +67,8 @@ class VetoStats:
     vetoed_subsample: int = 0
     vetoed_floor: int = 0
     vetoed_by_base: int = 0
-    checks: Counter[str] = field(default_factory=Counter)
+    checked: Counter[str] = field(default_factory=Counter)
+    regressed: Counter[str] = field(default_factory=Counter)
 
     @property
     def vetoed_by_guard(self) -> int:
@@ -78,7 +81,8 @@ class VetoStats:
         Returns
         -------
         dict
-            Every count, `vetoed_by_guard`, and `checks` sorted by name.
+            Every count and `vetoed_by_guard`. `checked` and `regressed` are
+            sorted by check name.
         """
         return {
             "proposals": self.proposals,
@@ -88,5 +92,6 @@ class VetoStats:
             "vetoed_floor": self.vetoed_floor,
             "vetoed_unverifiable": self.vetoed_unverifiable,
             "vetoed_by_base": self.vetoed_by_base,
-            "checks": dict(sorted(self.checks.items())),
+            "checked": dict(sorted(self.checked.items())),
+            "regressed": dict(sorted(self.regressed.items())),
         }

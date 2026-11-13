@@ -60,6 +60,22 @@ class TestMeasure:
         floor.measure(candidate("fails-e2"))
         assert (floor.n_rows, floor.n_cases) == (2, 2)
 
+    @pytest.mark.parametrize("names", [("emergency", "emergncy"), ("emergncy",)])
+    def test_rejects_a_check_without_cases(
+        self, model: Any, rows: list[dict[str, str]], names: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, names)
+        with pytest.raises(ValueError, match="'emergncy'"):
+            floor.measure(candidate("seed"))
+
+    def test_failed_measure_leaves_floor_unmeasured(
+        self, model: Any, rows: list[dict[str, str]]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, ("emergncy",))
+        with pytest.raises(ValueError, match="no row"):
+            floor.measure(candidate("seed"))
+        assert not floor.measured
+
     def test_scores_each_row_once(self, floor: ProtectedFloor, model: Any) -> None:
         assert model.scored == ["e1", "e2", "x1"]
 
@@ -149,3 +165,14 @@ class TestCache:
         for text in ("holds", "breaks-e2", "holds"):
             floor.regressions(candidate(text))
         assert floor.evaluations == 3 + 3 + 2 + 3
+
+
+class TestThreads:
+    def test_checks_do_not_overlap(
+        self, meeting_model: Any, rows: list[dict[str, str]], side_by_side: Any
+    ) -> None:
+        floor = ProtectedFloor(meeting_model, rows, ("emergency",))
+        floor.measure(candidate("seed"))
+        meeting_model.start_meeting()
+        side_by_side(floor.regressions, candidate("holds"), candidate("breaks-e2"))
+        assert not meeting_model.meeting.overlapped

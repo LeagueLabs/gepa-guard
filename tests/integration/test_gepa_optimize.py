@@ -89,3 +89,17 @@ class TestFloorGuard:
         result = optimize(criterion, unprotected_rows, **options)
         assert keeps_emergency(result)
         assert criterion.stats.vetoed_floor >= 1
+
+
+class TestMerges:
+    def test_unguarded_run_accepts_a_merge(
+        self, optimize_with_merges: Optimize
+    ) -> None:
+        result = optimize_with_merges(StrictImprovementAcceptance())
+        assert any(len(parents) > 1 for parents in result.parents)
+
+    def test_guarded_run_stops_at_the_merge(
+        self, optimize_with_merges: Optimize
+    ) -> None:
+        with pytest.raises(RuntimeError, match="use_merge=False"):
+            optimize_with_merges(guard())

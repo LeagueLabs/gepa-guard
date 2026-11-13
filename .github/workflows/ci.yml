@@ -32,13 +32,13 @@ jobs:
       - run: uv run --no-sync ty check
 
   test:
-    name: Test on Python ${{ matrix.python-version }} with ${{ matrix.gepa }} gepa
+    name: Test on Python ${{ matrix.python-version }}, gepa ${{ matrix.gepa }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
-        gepa: [lowest, latest]
+        gepa: ["0.1.4", latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,18 +50,20 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install the locked dependencies
-        if: matrix.gepa == 'lowest'
+        if: matrix.gepa != 'latest'
         run: uv sync --locked
 
       - name: Install the dependencies with the latest gepa
         if: matrix.gepa == 'latest'
         run: uv sync --upgrade-package gepa
 
-      - name: Test with gepa 0.1.4
-        if: matrix.gepa == 'lowest'
+      - name: Test with the oldest supported gepa
+        if: matrix.gepa != 'latest'
+        env:
+          GEPA_VERSION: ${{ matrix.gepa }}
         run: |
-          uv run --no-sync --with gepa==0.1.4 python -c "from importlib.metadata import version; print('gepa', version('gepa'))"
-          uv run --no-sync --with gepa==0.1.4 pytest
+          uv run --no-sync --with "gepa==$GEPA_VERSION" python -c "from importlib.metadata import version; print('gepa', version('gepa'))"
+          uv run --no-sync --with "gepa==$GEPA_VERSION" pytest
 
       - name: Test with the latest gepa
         if: matrix.gepa == 'latest'

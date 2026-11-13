@@ -1,17 +1,14 @@
-# Changelog
+# gepa-guard CHANGELOG
 
-All notable changes to this project are listed here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project uses
-[semantic versioning](https://semver.org/).
+## Unreleased
 
-## [Unreleased]
-
-### Added
-
-- `GuardedAcceptance`, a gepa acceptance criterion. It rejects a candidate
-  that loses a protected pass in its minibatch or in a `ProtectedFloor`.
-- `ProtectedFloor` and `FloorConfig`. They check protected rows outside the
-  minibatch against a reference candidate.
-- `VetoStats`, `Regression` and `FloorRegression`. They record what the guard
-  found and decided.
-- The MIT license.
+* Rejected misspelled or mismatched protected names and counted the protected passes the guard checked
+* Used a clearer changelog layout and named the CI test jobs by gepa version
+* Made the guard and the floor thread-safe and stopped the run on gepa merges
+* Added the license, authors and maintainers to the package metadata
+* Adopted Contributor Covenant 3.0 as the code of conduct
+* Released gepa-guard under the MIT license
+* Added the release, upstream gepa and Scorecard workflows and the repository policies
+* Added tests against gepa's non-regression rule and real `gepa.optimize` runs
+* Added `GuardedAcceptance`, `ProtectedFloor`, `FloorConfig`, `VetoStats`, `Regression` and `FloorRegression`
+* Set up the project with uv, ruff, ty, pytest and CI

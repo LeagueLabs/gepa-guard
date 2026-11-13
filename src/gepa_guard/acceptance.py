@@ -1,5 +1,7 @@
 """Acceptance criterion that rejects candidates that break a protected check."""
 
+import threading
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
@@ -26,7 +28,8 @@ class GuardedAcceptance:
     The checks run in this order. The protected checks must be readable. The
     candidate must keep every protected pass of its parent in the minibatch.
     The base criterion must accept. The candidate must hold the floor, when
-    one is given. The first check that fails rejects the candidate.
+    one is given. The first check that fails rejects the candidate. Calls
+    from several threads run one at a time.
 
     Parameters
     ----------
@@ -47,7 +50,8 @@ class GuardedAcceptance:
     ------
     ValueError
         If `protected` is a string, holds no names, or holds an empty or
-        non-string name. Also if `floor` is not measured.
+        non-string name. Also if `floor` is not measured or protects other
+        names than `protected`.
     """
 
     _max_pending: ClassVar[int] = 1024
@@ -58,13 +62,14 @@ class GuardedAcceptance:
         protected: Iterable[str],
         floor: ProtectedFloor | None = None,
     ) -> None:
-        if floor is not None and not floor.measured:
-            raise ValueError("floor must be measured before it can guard")
+        self._subsample = SubsampleCheck(protected)
+        if floor is not None:
+            _check_floor(floor, self._subsample.protected)
         self.base = base
         self.floor = floor
-        self.stats = VetoStats()
-        self._subsample = SubsampleCheck(protected)
+        self.stats = VetoStats(checked=Counter(dict.fromkeys(self.protected, 0)))
         self._pending: dict[int, _Decision] = {}
+        self._lock = threading.Lock()
 
     @property
     def protected(self) -> tuple[str, ...]:
@@ -85,11 +90,24 @@ class GuardedAcceptance:
         -------
         bool
             True when every check passes.
+
+        Raises
+        ------
+        RuntimeError
+            If the gepa state holds a merged candidate. gepa accepts merges
+            without the guard.
         """
-        decision = self._decide(proposal, state)
-        self._pending.pop(id(proposal), None)
-        if not decision.accepted:
-            self._hold(decision)
+        with self._lock:
+            merged = _merged_candidate(state)
+            if merged is not None:
+                raise RuntimeError(
+                    f"gepa accepted merge candidate {merged} without the guard. "
+                    "Run gepa with use_merge=False."
+                )
+            decision = self._decide(proposal, state)
+            self._pending.pop(id(proposal), None)
+            if not decision.accepted:
+                self._hold(decision)
         return decision.accepted
 
     def reject_reason(self, proposal: Any, state: Any) -> str:
@@ -110,7 +128,8 @@ class GuardedAcceptance:
         str
             The reason recorded by `should_accept`.
         """
-        decision = self._pending.pop(id(proposal), None)
+        with self._lock:
+            decision = self._pending.pop(id(proposal), None)
         if decision is None:
             return "no rejection was recorded for this proposal"
         return decision.reason
@@ -130,9 +149,10 @@ class GuardedAcceptance:
             self.stats.vetoed_unverifiable += 1
             reason = f"rejected: protected checks could not be verified ({problem})"
             return _Decision(proposal, False, reason)
+        self.stats.checked.update(finding.checked)
         if finding.regressions:
             self.stats.vetoed_subsample += 1
-            self.stats.checks.update(
+            self.stats.regressed.update(
                 regression.check for regression in finding.regressions
             )
             return _Decision(proposal, False, _minibatch_reason(finding.regressions))
@@ -148,7 +168,7 @@ class GuardedAcceptance:
         )
         if regressions:
             self.stats.vetoed_floor += 1
-            self.stats.checks.update(regression.check for regression in regressions)
+            self.stats.regressed.update(regression.check for regression in regressions)
             return _Decision(proposal, False, _floor_reason(regressions))
         self.stats.accepted += 1
         return _Decision(proposal, True, "accepted")
@@ -167,6 +187,25 @@ class GuardedAcceptance:
         return (
             f"rejected: the base criterion ({type(self.base).__name__}) did not accept"
         )
+
+
+def _check_floor(floor: ProtectedFloor, protected: tuple[str, ...]) -> None:
+    """Raise when a floor cannot guard the given protected names."""
+    if not floor.measured:
+        raise ValueError("floor must be measured before it can guard")
+    if set(floor.protected) != set(protected):
+        raise ValueError(
+            f"the floor protects {floor.protected} but the guard protects "
+            f"{protected}. Use the same names."
+        )
+
+
+def _merged_candidate(state: Any) -> int | None:
+    """Return the index of the first candidate with more than one parent."""
+    lineage = getattr(state, "parent_program_for_candidate", None) or ()
+    return next(
+        (index for index, parents in enumerate(lineage) if len(parents) > 1), None
+    )
 
 
 def _minibatch_reason(regressions: Sequence[Regression]) -> str:

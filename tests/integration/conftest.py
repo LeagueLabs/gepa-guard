@@ -7,6 +7,8 @@ import pytest
 from gepa.core.adapter import EvaluationBatch
 
 SCRIPT = ("alpha beta", "emergency alpha", "emergency alpha beta")
+MERGE_SEED = {"a": "emergency gamma", "b": "none"}
+MERGE_SCRIPT = {"a": "emergency alpha beta", "b": "delta"}
 
 
 @dataclass(frozen=True)
@@ -20,17 +22,19 @@ class Row:
 EMERGENCY = Row("emergency", protected=True)
 ALPHA = Row("alpha")
 BETA = Row("beta")
+GAMMA = Row("gamma")
+DELTA = Row("delta")
 
 
 class KeywordAdapter:
-    """gepa adapter that scores a row 1.0 when the prompt holds its keyword."""
+    """gepa adapter that scores a row 1.0 when the candidate holds its keyword."""
 
     propose_new_texts = None
 
     def evaluate(
         self, batch: list[Row], candidate: dict[str, str], capture_traces: bool = False
     ) -> EvaluationBatch:
-        scores = [float(row.keyword in candidate["prompt"]) for row in batch]
+        scores = [float(row.keyword in _text(candidate)) for row in batch]
         traces = [{"keyword": row.keyword} for row in batch] if capture_traces else None
         return EvaluationBatch(
             outputs=[None] * len(batch),
@@ -43,7 +47,7 @@ class KeywordAdapter:
         self, batch: Sequence[Row], candidate: Mapping[str, str]
     ) -> list[dict[str, float]]:
         return [
-            {"emergency": float(row.keyword in candidate["prompt"])}
+            {"emergency": float(row.keyword in _text(candidate))}
             if row.protected
             else {}
             for row in batch
@@ -57,6 +61,24 @@ class KeywordAdapter:
     ) -> dict[str, list[dict[str, float]]]:
         rows = [{"score": score} for score in eval_batch.scores]
         return {name: rows for name in components_to_update}
+
+
+def _text(candidate: Mapping[str, str]) -> str:
+    """Join the texts of every component of a candidate."""
+    return " ".join(candidate.values())
+
+
+class ComponentProposer:
+    """Gives the seed the texts of `MERGE_SCRIPT`. Other parents keep their texts."""
+
+    def __call__(
+        self,
+        candidate: dict[str, str],
+        reflective_dataset: Mapping[str, Sequence[Mapping[str, Any]]],
+        components_to_update: list[str],
+    ) -> dict[str, str]:
+        script = MERGE_SCRIPT if candidate == MERGE_SEED else candidate
+        return {name: script[name] for name in components_to_update}
 
 
 class ScriptedProposer:
@@ -132,6 +154,31 @@ def optimize(adapter: KeywordAdapter, logger: RecordingLogger) -> Callable[..., 
             track_best_outputs=False,
             seed=0,
             **options,
+        )
+
+    return run
+
+
+@pytest.fixture
+def optimize_with_merges(
+    adapter: KeywordAdapter, logger: RecordingLogger
+) -> Callable[..., Any]:
+    def run(criterion: Any) -> Any:
+        rows = [EMERGENCY, ALPHA, BETA, GAMMA, DELTA]
+        return gepa.optimize(
+            seed_candidate=MERGE_SEED,
+            trainset=rows,
+            valset=rows,
+            adapter=adapter,
+            custom_candidate_proposer=ComponentProposer(),
+            reflection_minibatch_size=len(rows),
+            acceptance_criterion=criterion,
+            max_metric_calls=200,
+            use_merge=True,
+            logger=logger,
+            run_dir=None,
+            track_best_outputs=False,
+            seed=0,
         )
 
     return run

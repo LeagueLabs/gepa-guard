@@ -24,8 +24,10 @@ def floor(
 
 
 @pytest.fixture
-def guard(accepting: Any, floor: ProtectedFloor) -> GuardedAcceptance:
-    return GuardedAcceptance(accepting, ("emergency",), floor=floor)
+def guard(
+    accepting: Any, floor: ProtectedFloor, protected: tuple[str, ...]
+) -> GuardedAcceptance:
+    return GuardedAcceptance(accepting, protected, floor=floor)
 
 
 class TestConstruction:
@@ -35,6 +37,21 @@ class TestConstruction:
         floor = ProtectedFloor(model, rows, ("emergency",))
         with pytest.raises(ValueError, match="measured"):
             GuardedAcceptance(accepting, ("emergency",), floor=floor)
+
+    @pytest.mark.parametrize(
+        "names", [("emergency",), ("encoding",), ("emergency", "encoding", "other")]
+    )
+    def test_rejects_floor_with_other_names(
+        self, accepting: Any, floor: ProtectedFloor, names: tuple[str, ...]
+    ) -> None:
+        with pytest.raises(ValueError, match="the floor protects"):
+            GuardedAcceptance(accepting, names, floor=floor)
+
+    def test_accepts_floor_names_in_any_order(
+        self, accepting: Any, floor: ProtectedFloor
+    ) -> None:
+        guard = GuardedAcceptance(accepting, ("encoding", "emergency"), floor=floor)
+        assert guard.floor is floor
 
     def test_rejects_empty_protected(self, accepting: Any) -> None:
         with pytest.raises(ValueError, match="protected"):
@@ -72,7 +89,26 @@ class TestShouldAccept:
         self, guard: GuardedAcceptance, regressed_proposal: Any
     ) -> None:
         guard.should_accept(regressed_proposal, STATE)
-        assert guard.stats.checks["emergency"] == 1
+        assert guard.stats.regressed["emergency"] == 1
+
+    def test_counts_checked_passes(
+        self, guard: GuardedAcceptance, regressed_proposal: Any
+    ) -> None:
+        guard.should_accept(regressed_proposal, STATE)
+        assert guard.stats.checked["emergency"] == 2
+
+    def test_lists_an_unmatched_name_at_zero(
+        self, accepting: Any, clean_proposal: Any
+    ) -> None:
+        guard = GuardedAcceptance(accepting, ("emergncy",))
+        guard.should_accept(clean_proposal, STATE)
+        assert guard.stats.as_dict()["checked"] == {"emergncy": 0}
+
+    def test_unverifiable_checks_nothing(
+        self, guard: GuardedAcceptance, unverifiable_proposal: Any
+    ) -> None:
+        guard.should_accept(unverifiable_proposal, STATE)
+        assert sum(guard.stats.checked.values()) == 0
 
     def test_unverifiable_is_rejected(
         self, guard: GuardedAcceptance, unverifiable_proposal: Any
@@ -88,9 +124,13 @@ class TestShouldAccept:
         assert guard.stats.vetoed_unverifiable == 1
 
     def test_base_rejection_skips_floor(
-        self, rejecting: Any, floor: ProtectedFloor, clean_proposal: Any
+        self,
+        rejecting: Any,
+        floor: ProtectedFloor,
+        protected: tuple[str, ...],
+        clean_proposal: Any,
     ) -> None:
-        guard = GuardedAcceptance(rejecting, ("emergency",), floor=floor)
+        guard = GuardedAcceptance(rejecting, protected, floor=floor)
         before = floor.evaluations
         assert not guard.should_accept(clean_proposal, STATE)
         assert (guard.stats.vetoed_by_base, floor.evaluations) == (1, before)
@@ -102,7 +142,7 @@ class TestShouldAccept:
             [{"emergency": 1.0}], [{"emergency": 1.0}], text="breaks-e2"
         )
         assert not guard.should_accept(proposal, STATE)
-        assert (guard.stats.vetoed_floor, guard.stats.checks["emergency"]) == (1, 1)
+        assert (guard.stats.vetoed_floor, guard.stats.regressed["emergency"]) == (1, 1)
 
     def test_counts_every_proposal(
         self, guard: GuardedAcceptance, clean_proposal: Any, regressed_proposal: Any
@@ -222,7 +262,7 @@ class TestRejectReason:
             two_check_model, [{"id": "m1"}], ("emergency", "encoding")
         )
         floor.measure({"prompt": "seed"})
-        guard = GuardedAcceptance(accepting, ("emergency",), floor=floor)
+        guard = GuardedAcceptance(accepting, ("emergency", "encoding"), floor=floor)
         proposal = make_proposal([{}], [{}], text="breaks-both")
         guard.should_accept(proposal, STATE)
         expected = "on emergency at row 0, encoding at row 0"
@@ -236,3 +276,41 @@ class TestRejectReason:
         rejecting.accept = True
         guard.should_accept(clean_proposal, STATE)
         assert guard.reject_reason(clean_proposal, STATE) == NO_REJECTION
+
+
+class TestThreads:
+    def test_decisions_do_not_overlap(
+        self, meeting_base: Any, side_by_side: Any, make_proposal: Any
+    ) -> None:
+        guard = GuardedAcceptance(meeting_base, ("emergency",))
+        first, second = (make_proposal([{}], [{}]) for _ in range(2))
+        side_by_side(
+            lambda proposal: guard.should_accept(proposal, STATE), first, second
+        )
+        assert not meeting_base.meeting.overlapped
+
+
+class TestMerges:
+    def test_merged_candidate_stops_the_run(
+        self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
+    ) -> None:
+        with pytest.raises(RuntimeError, match="use_merge=False"):
+            guard.should_accept(clean_proposal, merged_state)
+
+    def test_names_the_merged_candidate(
+        self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
+    ) -> None:
+        with pytest.raises(RuntimeError, match="candidate 3"):
+            guard.should_accept(clean_proposal, merged_state)
+
+    def test_reflective_candidates_pass(
+        self, guard: GuardedAcceptance, clean_proposal: Any, reflective_state: Any
+    ) -> None:
+        assert guard.should_accept(clean_proposal, reflective_state)
+
+    def test_stop_is_not_counted(
+        self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
+    ) -> None:
+        with pytest.raises(RuntimeError):
+            guard.should_accept(clean_proposal, merged_state)
+        assert guard.stats.proposals == 0

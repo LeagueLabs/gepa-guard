@@ -1,4 +1,5 @@
 import math
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -71,6 +72,17 @@ class TestRegressions:
         finding = check.inspect(make_proposal([{"emergency": 1.0}], [after]))
         assert finding.regressions == (Regression(0, "emergency"),)
 
+    def test_counts_checked_passes(
+        self, check: SubsampleCheck, regressed_proposal: Any
+    ) -> None:
+        assert check.inspect(regressed_proposal).checked == Counter({"emergency": 2})
+
+    def test_rows_without_a_parent_pass_are_not_checked(
+        self, check: SubsampleCheck, make_proposal: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": 0.0}, {}], [{}, {}])
+        assert check.inspect(proposal).checked == Counter()
+
     def test_reports_every_check(self, make_proposal: Any) -> None:
         both = {"emergency": 1.0, "encoding": 1.0}
         finding = SubsampleCheck(("emergency", "encoding")).inspect(
@@ -122,6 +134,12 @@ class TestUnverifiable:
         regressed_proposal.subsample_indices = [0]
         finding = check.inspect(regressed_proposal)
         assert (finding.regressions, finding.clean) == ((), False)
+
+    def test_problem_checks_nothing(
+        self, check: SubsampleCheck, regressed_proposal: Any
+    ) -> None:
+        regressed_proposal.subsample_indices = [0]
+        assert check.inspect(regressed_proposal).checked == Counter()
 
     def test_reads_object_without_evaluations(self, check: SubsampleCheck) -> None:
         assert check.inspect(object()).problem == "missing subsample evaluation"

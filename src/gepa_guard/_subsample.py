@@ -1,7 +1,8 @@
 """Protected non-regression check on the minibatch of a proposal."""
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from gepa_guard._scores import is_pass, is_valid_score, protected_names
@@ -19,10 +20,14 @@ class SubsampleFinding:
     regressions : tuple of Regression
         Protected checks the parent passed and the candidate failed. Empty
         when `problem` is set.
+    checked : collections.Counter
+        Protected passes of the parent compared, per check. Empty when
+        `problem` is set.
     """
 
     problem: str | None = None
     regressions: tuple[Regression, ...] = ()
+    checked: Counter[str] = field(default_factory=Counter)
 
     @property
     def clean(self) -> bool:
@@ -73,7 +78,15 @@ class SubsampleCheck:
         problem = self._value_problem(before, after)
         if problem is not None:
             return SubsampleFinding(problem=problem)
-        return SubsampleFinding(regressions=self._regressions(before, after))
+        return SubsampleFinding(
+            regressions=self._regressions(before, after), checked=self._checked(before)
+        )
+
+    def _checked(self, before: Sequence[dict[str, Any]]) -> Counter[str]:
+        """Count the protected passes of the parent, per check."""
+        return Counter(
+            name for row in before for name in self.protected if is_pass(row.get(name))
+        )
 
     def _value_problem(self, before: Sequence[Any], after: Sequence[Any]) -> str | None:
         """Return the first invalid row or protected score."""

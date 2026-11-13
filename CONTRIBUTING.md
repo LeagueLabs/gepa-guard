@@ -107,9 +107,8 @@ This applies to documentation, docstrings and comments.
 - Add it with `uv add` or `uv add --dev`. Commit `uv.lock` with the change.
 - Do not pin versions in `pyproject.toml`. `uv.lock` records exact versions.
   The lower bound on gepa is the one exception. It names the oldest gepa
-  release this library supports. When you change it, change the
-  `gepa==0.1.4` pin of the `lowest` test jobs in `.github/workflows/ci.yml`
-  too.
+  release this library supports. When you change it, change the `"0.1.4"`
+  entry of the `gepa` matrix in `.github/workflows/ci.yml` too.
 - The project supports Python 3.11 to 3.15.
 
 ## Compatibility with gepa
@@ -128,8 +127,9 @@ This applies to documentation, docstrings and comments.
   `gepa_guard`, not from its modules.
 - Modules, functions and attributes whose names start with `_` are private.
 - The project uses [semantic versioning](https://semver.org/).
-- A change that users can see needs an entry under "Unreleased" in
-  `CHANGELOG.md`.
+- Each pull request adds one line under "Unreleased" in `CHANGELOG.md`,
+  with its number, for example `(PR #12)`. A pull request with several
+  changes sums them up in that one line.
 
 ## Commits and pull requests
 

@@ -1,4 +1,6 @@
+import threading
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +25,13 @@ class Proposal:
     subsample_scores_before: list[float] | None = None
     subsample_scores_after: list[float] | None = None
     subsample_indices: list[int] | None = None
+
+
+@dataclass
+class Lineage:
+    """Stand-in for the parent record of gepa's GEPAState."""
+
+    parent_program_for_candidate: list[list[int | None]]
 
 
 class FixedBase:
@@ -66,6 +75,49 @@ class TableModel:
         return [self.table[candidate["prompt"]][row["id"]] for row in rows]
 
 
+class Meeting:
+    """Records whether two threads were inside a call at the same time."""
+
+    def __init__(self) -> None:
+        self.overlapped = False
+        self._barrier = threading.Barrier(2, timeout=0.2)
+
+    def join(self) -> None:
+        try:
+            self._barrier.wait()
+        except threading.BrokenBarrierError:
+            return
+        self.overlapped = True
+
+
+class MeetingBase(FixedBase):
+    """Accepting base criterion that joins a meeting on each call."""
+
+    def __init__(self) -> None:
+        super().__init__(accept=True)
+        self.meeting = Meeting()
+
+    def should_accept(self, proposal: Any, state: Any) -> bool:
+        self.meeting.join()
+        return super().should_accept(proposal, state)
+
+
+class MeetingModel(TableModel):
+    """Table model that joins a meeting on each call once one is set."""
+
+    meeting: Meeting | None = None
+
+    def start_meeting(self) -> None:
+        self.meeting = Meeting()
+
+    def __call__(
+        self, rows: Sequence[Any], candidate: Mapping[str, str]
+    ) -> list[dict[str, float]]:
+        if self.meeting is not None:
+            self.meeting.join()
+        return super().__call__(rows, candidate)
+
+
 def _evaluation(objectives: list[Any]) -> Evaluation:
     return Evaluation(scores=[0.0] * len(objectives), objective_scores=objectives)
 
@@ -101,6 +153,35 @@ def minimal_proposal() -> MinimalProposal:
 def unverifiable_proposal(clean_proposal: Proposal) -> Proposal:
     clean_proposal.eval_before = None
     return clean_proposal
+
+
+@pytest.fixture
+def side_by_side() -> Callable[..., None]:
+    def run(call: Callable[[Any], Any], first: Any, second: Any) -> None:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(call, [first, second]))
+
+    return run
+
+
+@pytest.fixture
+def meeting_base() -> MeetingBase:
+    return MeetingBase()
+
+
+@pytest.fixture
+def meeting_model(table: dict[str, dict[str, dict[str, float]]]) -> MeetingModel:
+    return MeetingModel(table)
+
+
+@pytest.fixture
+def reflective_state() -> Lineage:
+    return Lineage([[None], [0], [1]])
+
+
+@pytest.fixture
+def merged_state() -> Lineage:
+    return Lineage([[None], [0], [0], [1, 2]])
 
 
 @pytest.fixture
