@@ -1,11 +1,11 @@
 """Protected non-regression check on the minibatch of a proposal."""
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from gepa_guard._scores import is_pass, is_valid_score, protected_names
+from gepa_guard._scores import is_binary, is_pass, protected_names
 from gepa_guard.records import Regression
 
 
@@ -40,7 +40,8 @@ class SubsampleCheck:
 
     A protected objective passes only at exactly 1.0. A parent pass that the
     candidate does not keep is a regression. Proposals whose evaluations are
-    missing, misaligned or hold invalid protected scores cannot be checked.
+    missing or misaligned, or hold a protected score that is not 0 or 1,
+    cannot be checked.
 
     Parameters
     ----------
@@ -78,8 +79,10 @@ class SubsampleCheck:
         problem = self._value_problem(before, after)
         if problem is not None:
             return SubsampleFinding(problem=problem)
+        ids = getattr(proposal, "subsample_indices", None)
         return SubsampleFinding(
-            regressions=self._regressions(before, after), checked=self._checked(before)
+            regressions=self._regressions(before, after, ids),
+            checked=self._checked(before),
         )
 
     def _checked(self, before: Sequence[dict[str, Any]]) -> Counter[str]:
@@ -89,23 +92,30 @@ class SubsampleCheck:
         )
 
     def _value_problem(self, before: Sequence[Any], after: Sequence[Any]) -> str | None:
-        """Return the first invalid row or protected score."""
+        """Return the first invalid row or non-binary protected score."""
         for index, (old, new) in enumerate(zip(before, after, strict=True)):
             if not isinstance(old, dict) or not isinstance(new, dict):
-                return f"invalid objective row at minibatch index {index}"
+                return f"invalid objectives at minibatch row {index}"
             for name in self.protected:
-                if any(
-                    name in row and not is_valid_score(row[name]) for row in (old, new)
-                ):
-                    return f"invalid score for {name!r} at minibatch index {index}"
+                for row in (old, new):
+                    if name in row and not is_binary(row[name]):
+                        return (
+                            f"non-binary score {row[name]!r} for {name!r} "
+                            f"at minibatch row {index}"
+                        )
         return None
 
     def _regressions(
-        self, before: Sequence[dict[str, Any]], after: Sequence[dict[str, Any]]
+        self,
+        before: Sequence[dict[str, Any]],
+        after: Sequence[dict[str, Any]],
+        ids: Sequence[Hashable] | None,
     ) -> tuple[Regression, ...]:
         """Return every protected pass the candidate lost."""
         return tuple(
-            Regression(index=index, check=name)
+            Regression(
+                row=index, check=name, data_id=None if ids is None else ids[index]
+            )
             for index, (old, new) in enumerate(zip(before, after, strict=True))
             for name in self.protected
             if is_pass(old.get(name)) and not is_pass(new.get(name))

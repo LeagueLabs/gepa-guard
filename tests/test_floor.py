@@ -14,6 +14,15 @@ def floor(
     return floor
 
 
+@pytest.fixture
+def batched(
+    model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+) -> ProtectedFloor:
+    floor = ProtectedFloor(model, rows, protected, FloorConfig(batch_size=2))
+    floor.measure(candidate("seed"))
+    return floor
+
+
 def candidate(text: str) -> dict[str, str]:
     return {"prompt": text}
 
@@ -21,6 +30,13 @@ def candidate(text: str) -> dict[str, str]:
 class TestFloorConfig:
     def test_default_cache_size(self) -> None:
         assert FloorConfig().cache_size == 128
+
+    def test_default_batch_size(self) -> None:
+        assert FloorConfig().batch_size == 1
+
+    def test_rejects_batch_size_below_one(self) -> None:
+        with pytest.raises(ValueError, match="batch_size"):
+            FloorConfig(batch_size=0)
 
     def test_rejects_negative_cache_size(self) -> None:
         with pytest.raises(ValueError, match="cache_size"):
@@ -76,6 +92,13 @@ class TestMeasure:
             floor.measure(candidate("seed"))
         assert not floor.measured
 
+    def test_rejects_a_non_binary_reference_score(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        with pytest.raises(ValueError, match=r"non-binary score 0\.5 for 'emergency'"):
+            floor.measure(candidate("partial-e1"))
+
     def test_scores_each_row_once(self, floor: ProtectedFloor, model: Any) -> None:
         assert model.scored == ["e1", "e2", "x1"]
 
@@ -87,6 +110,16 @@ class TestMeasure:
 
 
 class TestRegressions:
+    def test_rejects_a_non_binary_candidate_score(self, floor: ProtectedFloor) -> None:
+        with pytest.raises(ValueError, match="at floor row 0"):
+            floor.regressions(candidate("partial-e1"))
+
+    def test_rejects_a_non_binary_score_of_any_protected_check(
+        self, floor: ProtectedFloor
+    ) -> None:
+        with pytest.raises(ValueError, match="for 'encoding' at floor row 0"):
+            floor.regressions(candidate("noisy-e1"))
+
     def test_holding_candidate_has_none(self, floor: ProtectedFloor) -> None:
         assert floor.regressions(candidate("holds")) == ()
 
@@ -123,11 +156,13 @@ class TestRegressions:
         floor.regressions(candidate("breaks-all"))
         assert model.scored[5:] == ["e2"]
 
+    @pytest.mark.parametrize("size", [1, 2])
     def test_rejects_wrong_result_count(
-        self, rows: list[dict[str, str]], protected: tuple[str, ...]
+        self, rows: list[dict[str, str]], protected: tuple[str, ...], size: int
     ) -> None:
-        floor = ProtectedFloor(lambda batch, _: [], rows, protected)
-        with pytest.raises(ValueError, match="1 row"):
+        config = FloorConfig(batch_size=size)
+        floor = ProtectedFloor(lambda batch, _: [], rows, protected, config)
+        with pytest.raises(ValueError, match=f"0 results, expected {size}"):
             floor.measure(candidate("seed"))
 
     def test_reports_every_check_of_the_row(
@@ -176,3 +211,73 @@ class TestThreads:
         meeting_model.start_meeting()
         side_by_side(floor.regressions, candidate("holds"), candidate("breaks-e2"))
         assert not meeting_model.meeting.overlapped
+
+
+class TestBatches:
+    def test_measure_scores_rows_in_batches(
+        self, batched: ProtectedFloor, model: Any
+    ) -> None:
+        assert model.calls == [2, 1]
+
+    def test_counts_rows_not_calls(self, batched: ProtectedFloor) -> None:
+        assert batched.evaluations == 3
+
+    def test_stops_after_the_first_regressed_batch(
+        self, batched: ProtectedFloor, model: Any
+    ) -> None:
+        batched.regressions(candidate("breaks-all"))
+        assert model.calls[2:] == [2]
+
+    def test_reports_the_first_regressed_row(self, batched: ProtectedFloor) -> None:
+        found = batched.regressions(candidate("breaks-all"))
+        assert found == (FloorRegression(0, "emergency"),)
+
+    def test_scores_every_batch_of_a_holding_candidate(
+        self, batched: ProtectedFloor, model: Any
+    ) -> None:
+        assert batched.regressions(candidate("holds")) == ()
+        assert model.calls[2:] == [2, 1]
+
+    def test_puts_every_regressed_row_of_a_batch_first(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected, FloorConfig(batch_size=3))
+        floor.measure(candidate("seed"))
+        floor.regressions(candidate("breaks-e2-x1"))
+        found = floor.regressions(candidate("breaks-e1-x1"))
+        assert found == (FloorRegression(2, "encoding"),)
+
+
+class TestFromAdapter:
+    def test_reads_objective_scores(
+        self, table_adapter: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor.from_adapter(table_adapter, rows, protected)
+        assert floor.measure(candidate("seed")) == {"emergency": 2, "encoding": 1}
+
+    def test_asks_for_no_traces(
+        self, table_adapter: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        ProtectedFloor.from_adapter(table_adapter, rows, protected).measure(
+            candidate("seed")
+        )
+        assert set(table_adapter.traces) == {False}
+
+    def test_uses_the_config(
+        self, table_adapter: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        config = FloorConfig(batch_size=3)
+        ProtectedFloor.from_adapter(table_adapter, rows, protected, config).measure(
+            candidate("seed")
+        )
+        assert table_adapter.model.calls == [3]
+
+    def test_rejects_an_adapter_without_objective_scores(
+        self,
+        silent_adapter: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+    ) -> None:
+        floor = ProtectedFloor.from_adapter(silent_adapter, rows, protected)
+        with pytest.raises(ValueError, match="objective_scores"):
+            floor.measure(candidate("seed"))

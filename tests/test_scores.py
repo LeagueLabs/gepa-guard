@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from gepa_guard._scores import is_pass, is_valid_score, protected_names
+from gepa_guard._scores import is_binary, is_pass, protected_names
 
 
 class TestProtectedNames:
@@ -43,17 +43,23 @@ class TestIsPass:
         assert is_pass(score) is expected
 
 
-class TestIsValidScore:
+class TestIsBinary:
     @pytest.mark.parametrize(
         ("score", "expected"),
         [
             (1.0, True),
+            (1, True),
             (0, True),
+            (0.0, True),
+            (True, True),
+            (False, True),
+            (0.5, False),
+            (0.1 * 3 / 0.3, False),
             (math.nan, False),
             (math.inf, False),
             ("1.0", False),
             (None, False),
         ],
     )
-    def test_accepts_only_finite_numbers(self, score: object, expected: bool) -> None:
-        assert is_valid_score(score) is expected
+    def test_accepts_only_zero_and_one(self, score: object, expected: bool) -> None:
+        assert is_binary(score) is expected

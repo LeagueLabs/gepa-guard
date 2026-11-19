@@ -1,6 +1,7 @@
 """Records of what the guard found and decided."""
 
 from collections import Counter
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,14 +12,17 @@ class Regression:
 
     Parameters
     ----------
-    index : int
+    row : int
         Position of the row in the minibatch.
     check : str
         Name of the protected objective.
+    data_id : hashable, optional
+        gepa id of the row in the dataset, when the proposal carries it.
     """
 
-    index: int
+    row: int
     check: str
+    data_id: Hashable | None = None
 
 
 @dataclass(frozen=True)
@@ -27,13 +31,13 @@ class FloorRegression:
 
     Parameters
     ----------
-    row_index : int
+    row : int
         Position of the row in the floor.
     check : str
         Name of the protected objective.
     """
 
-    row_index: int
+    row: int
     check: str
 
 
@@ -55,6 +59,8 @@ class VetoStats:
         Proposals rejected for a protected regression in the floor.
     vetoed_by_base : int
         Proposals rejected by the base criterion.
+    vetoed_subsample_base_accepted : int
+        Minibatch vetoes of proposals that the base criterion accepts.
     checked : collections.Counter
         Protected passes of the parent compared in the minibatch, per check.
     regressed : collections.Counter
@@ -67,6 +73,7 @@ class VetoStats:
     vetoed_subsample: int = 0
     vetoed_floor: int = 0
     vetoed_by_base: int = 0
+    vetoed_subsample_base_accepted: int = 0
     checked: Counter[str] = field(default_factory=Counter)
     regressed: Counter[str] = field(default_factory=Counter)
 
@@ -75,14 +82,23 @@ class VetoStats:
         """Proposals rejected for a protected regression in the minibatch or floor."""
         return self.vetoed_subsample + self.vetoed_floor
 
+    @property
+    def overrode_base(self) -> int:
+        """Vetoes of proposals that the base criterion accepts.
+
+        Every floor veto counts, because the floor runs only after the base
+        criterion accepts.
+        """
+        return self.vetoed_subsample_base_accepted + self.vetoed_floor
+
     def as_dict(self) -> dict[str, Any]:
         """Return the counts as a plain dictionary.
 
         Returns
         -------
         dict
-            Every count and `vetoed_by_guard`. `checked` and `regressed` are
-            sorted by check name.
+            Every count, `vetoed_by_guard` and `overrode_base`. `checked` and
+            `regressed` are sorted by check name.
         """
         return {
             "proposals": self.proposals,
@@ -92,6 +108,8 @@ class VetoStats:
             "vetoed_floor": self.vetoed_floor,
             "vetoed_unverifiable": self.vetoed_unverifiable,
             "vetoed_by_base": self.vetoed_by_base,
+            "vetoed_subsample_base_accepted": self.vetoed_subsample_base_accepted,
+            "overrode_base": self.overrode_base,
             "checked": dict(sorted(self.checked.items())),
             "regressed": dict(sorted(self.regressed.items())),
         }

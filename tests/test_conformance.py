@@ -6,7 +6,7 @@ from gepa.proposer.base import CandidateProposal, SubsampleEvaluation
 from gepa.strategies import acceptance
 from gepa.strategies.acceptance import ImprovementOrEqualAcceptance
 
-from gepa_guard import GuardedAcceptance
+from gepa_guard import BaseCriterion, GuardedAcceptance
 
 PROTECTED = ("emergency",)
 PASS = {"emergency": 1.0}
@@ -58,7 +58,13 @@ CASES = [
     case("lost_then_invalid", [PASS, PASS], [FAIL, {"emergency": math.nan}], False),
 ]
 
-SAME_KIND = [case for case in CASES if case.id != "lost_then_invalid"]
+DIFFERENT_KIND = {"lost_then_invalid", "pass_lowered"}
+SAME_KIND = [case for case in CASES if case.id not in DIFFERENT_KIND]
+
+NON_BINARY = [
+    pytest.param([{"emergency": 0.5}], [{}], id="parent_partial"),
+    pytest.param([FAIL], [{"emergency": 0.5}], id="child_partial"),
+]
 
 
 @pytest.fixture
@@ -71,6 +77,14 @@ def upstream() -> Any:
 
 def guard() -> GuardedAcceptance:
     return GuardedAcceptance(ImprovementOrEqualAcceptance(), PROTECTED)
+
+
+class TestBaseCriterion:
+    def test_gepa_criteria_match(self) -> None:
+        assert isinstance(ImprovementOrEqualAcceptance(), BaseCriterion)
+
+    def test_the_guard_is_a_criterion(self) -> None:
+        assert isinstance(guard(), BaseCriterion)
 
 
 class TestGuardOnGepaProposals:
@@ -107,3 +121,27 @@ class TestConformanceWithGepa:
             upstream(base=ImprovementOrEqualAcceptance(), protected=protected)
         with pytest.raises(ValueError, match="protected"):
             GuardedAcceptance(ImprovementOrEqualAcceptance(), protected)
+
+
+class TestDifferencesFromGepa:
+    @pytest.mark.parametrize(("before", "after"), NON_BINARY)
+    def test_guard_rejects_non_binary_scores(self, before: Any, after: Any) -> None:
+        assert guard().should_accept(proposal(before, after), None) is False
+
+    @pytest.mark.parametrize(("before", "after"), NON_BINARY)
+    def test_gepa_rule_accepts_them(
+        self, upstream: Any, before: Any, after: Any
+    ) -> None:
+        rule = upstream(base=ImprovementOrEqualAcceptance(), protected=PROTECTED)
+        assert rule.should_accept(proposal(before, after), None) is True
+
+    def test_lowered_pass_is_unverifiable_here_and_a_regression_in_gepa(
+        self, upstream: Any
+    ) -> None:
+        lowered = proposal([PASS], [{"emergency": 0.99}])
+        ours = guard()
+        ours.should_accept(lowered, None)
+        rule = upstream(base=ImprovementOrEqualAcceptance(), protected=PROTECTED)
+        rule.should_accept(lowered, None)
+        assert ours.stats.vetoed_unverifiable == 1
+        assert "regressed" in rule.reject_reason(lowered, None)

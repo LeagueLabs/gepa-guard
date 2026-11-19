@@ -2,6 +2,7 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -67,12 +68,30 @@ class TableModel:
     def __init__(self, table: Mapping[str, Mapping[str, dict[str, float]]]) -> None:
         self.table = table
         self.scored: list[str] = []
+        self.calls: list[int] = []
 
     def __call__(
         self, rows: Sequence[Any], candidate: Mapping[str, str]
     ) -> list[dict[str, float]]:
+        self.calls.append(len(rows))
         self.scored.extend(row["id"] for row in rows)
         return [self.table[candidate["prompt"]][row["id"]] for row in rows]
+
+
+class TableAdapter:
+    """gepa-style adapter around a table model that records `capture_traces`."""
+
+    def __init__(self, model: TableModel, objectives: bool = True) -> None:
+        self.model = model
+        self.objectives = objectives
+        self.traces: list[bool] = []
+
+    def evaluate(
+        self, batch: list[Any], candidate: dict[str, str], capture_traces: bool = False
+    ) -> SimpleNamespace:
+        self.traces.append(capture_traces)
+        scores = self.model(batch, candidate) if self.objectives else None
+        return SimpleNamespace(objective_scores=scores)
 
 
 class Meeting:
@@ -223,6 +242,26 @@ def table() -> dict[str, dict[str, dict[str, float]]]:
             "e2": {"emergency": 0.0},
             "x1": {"encoding": 0.0},
         },
+        "breaks-e2-x1": {
+            "e1": {"emergency": 1.0},
+            "e2": {"emergency": 0.0},
+            "x1": {"encoding": 0.0},
+        },
+        "breaks-e1-x1": {
+            "e1": {"emergency": 0.0},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 0.0},
+        },
+        "partial-e1": {
+            "e1": {"emergency": 0.5},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 1.0},
+        },
+        "noisy-e1": {
+            "e1": {"emergency": 1.0, "encoding": 0.5},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 1.0},
+        },
         "fails-e2": {
             "e1": {"emergency": 1.0},
             "e2": {"emergency": 0.0},
@@ -234,6 +273,16 @@ def table() -> dict[str, dict[str, dict[str, float]]]:
 @pytest.fixture
 def model(table: dict[str, dict[str, dict[str, float]]]) -> TableModel:
     return TableModel(table)
+
+
+@pytest.fixture
+def table_adapter(model: TableModel) -> TableAdapter:
+    return TableAdapter(model)
+
+
+@pytest.fixture
+def silent_adapter(model: TableModel) -> TableAdapter:
+    return TableAdapter(model, objectives=False)
 
 
 @pytest.fixture

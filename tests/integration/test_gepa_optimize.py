@@ -10,7 +10,12 @@ from gepa.strategies.proposal_selection import (
     TopKImprovements,
 )
 
-from gepa_guard import GuardedAcceptance, ProtectedFloor
+from gepa_guard import (
+    FloorConfig,
+    GuardedAcceptance,
+    ProtectedFloor,
+    UnguardedMergeError,
+)
 
 PROTECTED = ("emergency",)
 LOSES_EMERGENCY = {"prompt": "alpha beta"}
@@ -91,6 +96,22 @@ class TestFloorGuard:
         assert criterion.stats.vetoed_floor >= 1
 
 
+class TestAdapterFloor:
+    @pytest.mark.parametrize("batch_size", [1, 2])
+    def test_keeps_emergency(
+        self,
+        optimize: Optimize,
+        adapter: Any,
+        protected_rows: list[Any],
+        unprotected_rows: list[Any],
+        batch_size: int,
+    ) -> None:
+        config = FloorConfig(batch_size=batch_size)
+        floor = ProtectedFloor.from_adapter(adapter, protected_rows, PROTECTED, config)
+        floor.measure({"prompt": "emergency"})
+        assert keeps_emergency(optimize(guard(floor), unprotected_rows))
+
+
 class TestMerges:
     def test_unguarded_run_accepts_a_merge(
         self, optimize_with_merges: Optimize
@@ -101,5 +122,5 @@ class TestMerges:
     def test_guarded_run_stops_at_the_merge(
         self, optimize_with_merges: Optimize
     ) -> None:
-        with pytest.raises(RuntimeError, match="use_merge=False"):
+        with pytest.raises(UnguardedMergeError, match="use_merge=False"):
             optimize_with_merges(guard())

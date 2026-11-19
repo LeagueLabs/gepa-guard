@@ -4,15 +4,36 @@ import threading
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from gepa_guard._subsample import SubsampleCheck
+from gepa_guard.exceptions import UnguardedMergeError
 from gepa_guard.floor import ProtectedFloor
 from gepa_guard.records import FloorRegression, Regression, VetoStats
 
 
-class _Criterion(Protocol):
-    def should_accept(self, proposal: Any, state: Any) -> bool: ...
+@runtime_checkable
+class BaseCriterion(Protocol):
+    """Criterion that decides whether gepa may accept a proposal.
+
+    gepa's acceptance criteria and `GuardedAcceptance` match it.
+    """
+
+    def should_accept(self, proposal: Any, state: Any, /) -> bool:
+        """Return whether gepa may accept a proposal.
+
+        Parameters
+        ----------
+        proposal : object
+            A gepa ``CandidateProposal`` or an object with the same attributes.
+        state : object
+            The gepa state.
+
+        Returns
+        -------
+        bool
+            True when the proposal is accepted.
+        """
 
 
 @dataclass(frozen=True)
@@ -25,15 +46,17 @@ class _Decision:
 class GuardedAcceptance:
     """Acceptance criterion that rejects any candidate that breaks a protected check.
 
-    The checks run in this order. The protected checks must be readable. The
-    candidate must keep every protected pass of its parent in the minibatch.
-    The base criterion must accept. The candidate must hold the floor, when
-    one is given. The first check that fails rejects the candidate. Calls
+    The checks run in this order. The protected checks must be readable, with
+    scores of 0 or 1. The candidate must keep every protected pass of its
+    parent in the minibatch. The base criterion must accept. The candidate
+    must hold the floor, when one is given. The first check that fails rejects
+    the candidate. After a minibatch veto, the guard still asks the base
+    criterion, only to count in `stats` the vetoes that override it. Calls
     from several threads run one at a time.
 
     Parameters
     ----------
-    base : object
+    base : BaseCriterion
         Criterion with ``should_accept(proposal, state)``, for example a gepa
         acceptance criterion.
     protected : iterable of str
@@ -58,7 +81,7 @@ class GuardedAcceptance:
 
     def __init__(
         self,
-        base: _Criterion,
+        base: BaseCriterion,
         protected: Iterable[str],
         floor: ProtectedFloor | None = None,
     ) -> None:
@@ -93,17 +116,17 @@ class GuardedAcceptance:
 
         Raises
         ------
-        RuntimeError
+        UnguardedMergeError
             If the gepa state holds a merged candidate. gepa accepts merges
             without the guard.
+        ValueError
+            If the floor's evaluator returns a wrong result. See
+            `ProtectedFloor.regressions`.
         """
         with self._lock:
             merged = _merged_candidate(state)
             if merged is not None:
-                raise RuntimeError(
-                    f"gepa accepted merge candidate {merged} without the guard. "
-                    "Run gepa with use_merge=False."
-                )
+                raise UnguardedMergeError(merged)
             decision = self._decide(proposal, state)
             self._pending.pop(id(proposal), None)
             if not decision.accepted:
@@ -155,6 +178,8 @@ class GuardedAcceptance:
             self.stats.regressed.update(
                 regression.check for regression in finding.regressions
             )
+            if self.base.should_accept(proposal, state):
+                self.stats.vetoed_subsample_base_accepted += 1
             return _Decision(proposal, False, _minibatch_reason(finding.regressions))
         if not self.base.should_accept(proposal, state):
             self.stats.vetoed_by_base += 1
@@ -211,15 +236,20 @@ def _merged_candidate(state: Any) -> int | None:
 def _minibatch_reason(regressions: Sequence[Regression]) -> str:
     """Describe protected regressions in the minibatch."""
     cases = ", ".join(
-        f"{regression.check} at index {regression.index}" for regression in regressions
+        f"{regression.check} at row {regression.row}{_data_id_note(regression)}"
+        for regression in regressions
     )
     return f"rejected: protected regression in the minibatch on {cases}"
+
+
+def _data_id_note(regression: Regression) -> str:
+    """Describe the dataset id of a regression, when it is known."""
+    return "" if regression.data_id is None else f" (data id {regression.data_id})"
 
 
 def _floor_reason(regressions: Sequence[FloorRegression]) -> str:
     """Describe protected regressions in the floor."""
     cases = ", ".join(
-        f"{regression.check} at row {regression.row_index}"
-        for regression in regressions
+        f"{regression.check} at row {regression.row}" for regression in regressions
     )
     return f"rejected: protected regression in the floor on {cases}"

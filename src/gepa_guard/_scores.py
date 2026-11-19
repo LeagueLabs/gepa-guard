@@ -50,8 +50,8 @@ def is_pass(score: object) -> bool:
     return score == 1.0
 
 
-def is_valid_score(score: Any) -> bool:
-    """Return whether a score is a finite number.
+def is_binary(score: Any) -> bool:
+    """Return whether a protected score is 0 or 1.
 
     Parameters
     ----------
@@ -61,9 +61,10 @@ def is_valid_score(score: Any) -> bool:
     Returns
     -------
     bool
-        False for NaN, infinity and values that are not numbers.
+        True for 0, 1, False and True. False for any other number, for NaN
+        and for values that are not numbers.
     """
     try:
-        return isfinite(score)
+        return isfinite(score) and score in (0, 1)
     except (TypeError, ValueError, OverflowError):
         return False

@@ -53,7 +53,6 @@ class TestRegressions:
             ({"emergency": 0.0}, {}),
             ({}, {}),
             ({"core": 1.0}, {"core": 0.0}),
-            ({"emergency": 0.5}, {}),
         ],
     )
     def test_ignores_rows_without_a_parent_pass(
@@ -65,12 +64,20 @@ class TestRegressions:
     ) -> None:
         assert check.inspect(make_proposal([before], [after])).clean
 
-    @pytest.mark.parametrize("after", [{}, {"emergency": 0.0}, {"emergency": 0.99}])
+    @pytest.mark.parametrize("after", [{}, {"emergency": 0.0}])
     def test_missing_or_lower_score_regresses(
         self, check: SubsampleCheck, make_proposal: Any, after: dict[str, float]
     ) -> None:
         finding = check.inspect(make_proposal([{"emergency": 1.0}], [after]))
         assert finding.regressions == (Regression(0, "emergency"),)
+
+    def test_records_the_data_id(
+        self, check: SubsampleCheck, regressed_proposal: Any
+    ) -> None:
+        regressed_proposal.subsample_indices = [10, 11]
+        assert check.inspect(regressed_proposal).regressions == (
+            Regression(1, "emergency", data_id=11),
+        )
 
     def test_counts_checked_passes(
         self, check: SubsampleCheck, regressed_proposal: Any
@@ -110,15 +117,23 @@ class TestUnverifiable:
             (_set("subsample_indices", [0, 1]), "subsample indices"),
             (
                 _set("eval_after.objective_scores", ["row"]),
-                "invalid objective row at minibatch index 0",
+                "invalid objectives at minibatch row 0",
             ),
             (
                 _set("eval_after.objective_scores", [{"emergency": math.nan}]),
-                "invalid score for 'emergency'",
+                "non-binary score nan for 'emergency' at minibatch row 0",
             ),
             (
                 _set("eval_before.objective_scores", [{"emergency": "1.0"}]),
-                "invalid score for 'emergency'",
+                "non-binary score '1.0' for 'emergency'",
+            ),
+            (
+                _set("eval_before.objective_scores", [{"emergency": 0.5}]),
+                "non-binary score 0.5 for 'emergency'",
+            ),
+            (
+                _set("eval_after.objective_scores", [{"emergency": 0.99}]),
+                "non-binary score 0.99 for 'emergency'",
             ),
         ],
     )

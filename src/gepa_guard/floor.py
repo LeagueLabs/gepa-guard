@@ -2,16 +2,36 @@
 
 import threading
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any, Protocol, Self
 
 from gepa_guard._fingerprint import candidate_fingerprint
-from gepa_guard._scores import is_pass, protected_names
+from gepa_guard._scores import is_binary, is_pass, protected_names
 from gepa_guard.records import FloorRegression
 
-Objectives: TypeAlias = Mapping[str, float]
-Evaluate: TypeAlias = Callable[[Sequence[Any], Mapping[str, str]], Sequence[Objectives]]
+
+class Evaluator(Protocol):
+    """Scores rows of a floor with a candidate."""
+
+    def __call__(
+        self, rows: Sequence[Any], candidate: Mapping[str, str], /
+    ) -> Sequence[Mapping[str, float]]:
+        """Return the objective scores of each row.
+
+        Parameters
+        ----------
+        rows : sequence
+            Rows of the floor to score.
+        candidate : mapping of str to str
+            Component name to component text.
+
+        Returns
+        -------
+        sequence of mapping of str to float
+            One mapping of objective name to score per row, in the order of
+            `rows`. A protected score is 0 or 1.
+        """
 
 
 @dataclass(frozen=True)
@@ -22,19 +42,24 @@ class FloorConfig:
     ----------
     cache_size : int, default 128
         Number of candidates whose results are kept. 0 turns the cache off.
+    batch_size : int, default 1
+        Number of rows passed to one call of the evaluator.
 
     Raises
     ------
     ValueError
-        If `cache_size` is negative.
+        If `cache_size` is negative or `batch_size` is below 1.
     """
 
     cache_size: int = 128
+    batch_size: int = 1
 
     def __post_init__(self) -> None:
         """Validate the settings."""
         if self.cache_size < 0:
             raise ValueError("cache_size must be zero or positive")
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be at least 1")
 
 
 class ProtectedFloor:
@@ -44,7 +69,7 @@ class ProtectedFloor:
 
     Parameters
     ----------
-    evaluate : callable
+    evaluate : Evaluator
         Takes a sequence of rows and a candidate. Returns one objectives mapping
         per row, in the same order.
     rows : sequence
@@ -63,7 +88,7 @@ class ProtectedFloor:
 
     def __init__(
         self,
-        evaluate: Evaluate,
+        evaluate: Evaluator,
         rows: Sequence[Any],
         protected: Iterable[str],
         config: FloorConfig | None = None,
@@ -77,6 +102,37 @@ class ProtectedFloor:
         self._cache: dict[str, tuple[FloorRegression, ...]] = {}
         self._evaluations = 0
         self._lock = threading.Lock()
+
+    @classmethod
+    def from_adapter(
+        cls,
+        adapter: Any,
+        rows: Sequence[Any],
+        protected: Iterable[str],
+        config: FloorConfig | None = None,
+    ) -> Self:
+        """Build a floor that scores rows with a gepa adapter.
+
+        The floor calls ``adapter.evaluate(rows, candidate, capture_traces=False)``
+        and reads the ``objective_scores`` of the result.
+
+        Parameters
+        ----------
+        adapter : object
+            A gepa adapter, or an object with the same ``evaluate`` method.
+        rows : sequence
+            Rows of the floor, in the form the adapter takes.
+        protected : iterable of str
+            Objective names to protect.
+        config : FloorConfig, optional
+            Settings. The defaults of `FloorConfig` apply when omitted.
+
+        Returns
+        -------
+        ProtectedFloor
+            An unmeasured floor.
+        """
+        return cls(_AdapterEvaluator(adapter), rows, protected, config)
 
     @property
     def measured(self) -> bool:
@@ -95,11 +151,13 @@ class ProtectedFloor:
 
     @property
     def evaluations(self) -> int:
-        """Rows scored so far, one call to `evaluate` each."""
+        """Rows scored so far."""
         return self._evaluations
 
     def measure(self, reference: Mapping[str, str]) -> dict[str, int]:
         """Score every row with the reference and record the checks it passed.
+
+        Rows are scored in batches of `FloorConfig.batch_size`.
 
         Parameters
         ----------
@@ -114,8 +172,9 @@ class ProtectedFloor:
         Raises
         ------
         ValueError
-            If the reference passes no row of a protected check. The floor
-            then keeps its earlier state.
+            If the reference passes no row of a protected check, or if
+            `evaluate` returns the wrong number of results or a protected
+            score that is not 0 or 1. The floor then keeps its earlier state.
         """
         with self._lock:
             return self._measure(reference)
@@ -123,8 +182,9 @@ class ProtectedFloor:
     def regressions(self, candidate: Mapping[str, str]) -> tuple[FloorRegression, ...]:
         """Return the protected checks the reference passed and the candidate fails.
 
-        Scoring stops at the first row with a regression. Rows that regressed
-        before are scored first.
+        Rows are scored in batches of `FloorConfig.batch_size`. Scoring stops
+        after the first batch with a regression. Rows that regressed before are
+        scored first.
 
         Parameters
         ----------
@@ -141,6 +201,9 @@ class ProtectedFloor:
         ------
         RuntimeError
             If `measure` was not called first.
+        ValueError
+            If `evaluate` returns the wrong number of results or a protected
+            score that is not 0 or 1.
         """
         with self._lock:
             return self._regressions(candidate)
@@ -148,13 +211,16 @@ class ProtectedFloor:
     def _measure(self, reference: Mapping[str, str]) -> dict[str, int]:
         """Score every row with the reference and record the checks it passed."""
         required: dict[int, tuple[str, ...]] = {}
-        for index, row in enumerate(self._rows):
-            objectives = self._score(row, reference)
-            passed = tuple(
-                name for name in self.protected if is_pass(objectives.get(name))
-            )
-            if passed:
-                required[index] = passed
+        for batch in self._batches(range(len(self._rows))):
+            for index, objectives in zip(
+                batch, self._score(batch, reference), strict=True
+            ):
+                _check_binary(index, self.protected, objectives)
+                passed = tuple(
+                    name for name in self.protected if is_pass(objectives.get(name))
+                )
+                if passed:
+                    required[index] = passed
         counts = {
             name: sum(name in checks for checks in required.values())
             for name in self.protected
@@ -184,26 +250,42 @@ class ProtectedFloor:
     def _first_regression(
         self, required: Mapping[int, tuple[str, ...]], candidate: Mapping[str, str]
     ) -> tuple[FloorRegression, ...]:
-        """Return the failed checks of the first regressed row, in priority order."""
-        for index in sorted(required, key=lambda row: (-self._failures[row], row)):
-            objectives = self._score(self._rows[index], candidate)
-            found = tuple(
-                FloorRegression(row_index=index, check=check)
-                for check in required[index]
-                if not is_pass(objectives.get(check))
-            )
-            if found:
-                self._failures[index] += 1
-                return found
+        """Return the failed checks of the first regressed row, in priority order.
+
+        Every regressed row of the scored batch counts as a failure. Those rows
+        are scored first for the next candidate.
+        """
+        order = sorted(required, key=lambda row: (-self._failures[row], row))
+        for batch in self._batches(order):
+            regressed = []
+            for index, objectives in zip(
+                batch, self._score(batch, candidate), strict=True
+            ):
+                _check_binary(index, self.protected, objectives)
+                if found := _lost(index, required[index], objectives):
+                    regressed.append(found)
+            self._failures.update(found[0].row for found in regressed)
+            if regressed:
+                return regressed[0]
         return ()
 
-    def _score(self, row: Any, candidate: Mapping[str, str]) -> Objectives:
-        """Score one row with one call to `evaluate`."""
-        self._evaluations += 1
-        scored = self._evaluate([row], candidate)
-        if len(scored) != 1:
-            raise ValueError(f"evaluate returned {len(scored)} results for 1 row")
-        return scored[0]
+    def _batches(self, indices: Sequence[int]) -> Iterator[Sequence[int]]:
+        """Split row indices into batches of `FloorConfig.batch_size`."""
+        size = self.config.batch_size
+        for start in range(0, len(indices), size):
+            yield indices[start : start + size]
+
+    def _score(
+        self, indices: Sequence[int], candidate: Mapping[str, str]
+    ) -> Sequence[Mapping[str, float]]:
+        """Score a batch of rows with one call to `evaluate`."""
+        self._evaluations += len(indices)
+        scored = self._evaluate([self._rows[index] for index in indices], candidate)
+        if len(scored) != len(indices):
+            raise ValueError(
+                f"evaluate returned {len(scored)} results, expected {len(indices)}"
+            )
+        return scored
 
     def _remember(self, key: str, found: tuple[FloorRegression, ...]) -> None:
         """Cache a result and evict the oldest entry when the cache is full."""
@@ -212,3 +294,48 @@ class ProtectedFloor:
         if len(self._cache) >= self.config.cache_size:
             del self._cache[next(iter(self._cache))]
         self._cache[key] = found
+
+
+def _lost(
+    row: int, checks: Sequence[str], objectives: Mapping[str, float]
+) -> tuple[FloorRegression, ...]:
+    """Return the protected checks of a row that the candidate failed."""
+    return tuple(
+        FloorRegression(row=row, check=check)
+        for check in checks
+        if not is_pass(objectives.get(check))
+    )
+
+
+def _check_binary(
+    row: int, names: Iterable[str], objectives: Mapping[str, float]
+) -> None:
+    """Raise when a protected score of a floor row is not 0 or 1."""
+    for name in names:
+        if name in objectives and not is_binary(objectives[name]):
+            raise ValueError(
+                f"evaluate returned a non-binary score {objectives[name]!r} "
+                f"for {name!r} at floor row {row}"
+            )
+
+
+class _AdapterEvaluator:
+    """Evaluator that scores rows with a gepa adapter."""
+
+    def __init__(self, adapter: Any) -> None:
+        self.adapter = adapter
+
+    def __call__(
+        self, rows: Sequence[Any], candidate: Mapping[str, str], /
+    ) -> Sequence[Mapping[str, float]]:
+        """Return the objective scores the adapter gives each row."""
+        result = self.adapter.evaluate(
+            list(rows), dict(candidate), capture_traces=False
+        )
+        scores = getattr(result, "objective_scores", None)
+        if scores is None:
+            raise ValueError(
+                "the adapter returned no objective_scores. "
+                "It must score every protected check."
+            )
+        return scores

@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from gepa_guard import GuardedAcceptance, ProtectedFloor
+from gepa_guard import GuardedAcceptance, ProtectedFloor, UnguardedMergeError
 
 STATE = object()
 NO_REJECTION = "no rejection was recorded for this proposal"
@@ -79,11 +79,29 @@ class TestShouldAccept:
         assert guard.should_accept(clean_proposal, STATE)
         assert guard.stats.accepted == 1
 
-    def test_minibatch_regression_skips_base(
+    def test_minibatch_regression_overrides_the_base(
         self, guard: GuardedAcceptance, accepting: Any, regressed_proposal: Any
     ) -> None:
         assert not guard.should_accept(regressed_proposal, STATE)
-        assert (guard.stats.vetoed_subsample, accepting.calls) == (1, 0)
+        assert (guard.stats.vetoed_subsample, accepting.calls) == (1, 1)
+
+    @pytest.mark.parametrize(("base", "expected"), [("accepting", 1), ("rejecting", 0)])
+    def test_counts_vetoes_the_base_would_accept(
+        self,
+        request: pytest.FixtureRequest,
+        regressed_proposal: Any,
+        base: str,
+        expected: int,
+    ) -> None:
+        guard = GuardedAcceptance(request.getfixturevalue(base), ("emergency",))
+        guard.should_accept(regressed_proposal, STATE)
+        assert guard.stats.vetoed_subsample_base_accepted == expected
+
+    def test_unverifiable_does_not_ask_the_base(
+        self, guard: GuardedAcceptance, accepting: Any, unverifiable_proposal: Any
+    ) -> None:
+        guard.should_accept(unverifiable_proposal, STATE)
+        assert accepting.calls == 0
 
     def test_counts_regressed_checks(
         self, guard: GuardedAcceptance, regressed_proposal: Any
@@ -143,6 +161,7 @@ class TestShouldAccept:
         )
         assert not guard.should_accept(proposal, STATE)
         assert (guard.stats.vetoed_floor, guard.stats.regressed["emergency"]) == (1, 1)
+        assert guard.stats.overrode_base == 1
 
     def test_counts_every_proposal(
         self, guard: GuardedAcceptance, clean_proposal: Any, regressed_proposal: Any
@@ -158,7 +177,7 @@ class TestRejectReason:
         [
             (
                 "regressed_proposal",
-                "protected regression in the minibatch on emergency at index 1",
+                "protected regression in the minibatch on emergency at row 1",
             ),
             (
                 "unverifiable_proposal",
@@ -176,6 +195,14 @@ class TestRejectReason:
         proposal = request.getfixturevalue(fixture)
         guard.should_accept(proposal, STATE)
         assert expected in guard.reject_reason(proposal, STATE)
+
+    def test_names_the_data_id(
+        self, guard: GuardedAcceptance, regressed_proposal: Any
+    ) -> None:
+        regressed_proposal.subsample_indices = [10, 11]
+        guard.should_accept(regressed_proposal, STATE)
+        expected = "on emergency at row 1 (data id 11)"
+        assert expected in guard.reject_reason(regressed_proposal, STATE)
 
     def test_names_the_floor_row(
         self, guard: GuardedAcceptance, make_proposal: Any
@@ -294,14 +321,15 @@ class TestMerges:
     def test_merged_candidate_stops_the_run(
         self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
     ) -> None:
-        with pytest.raises(RuntimeError, match="use_merge=False"):
+        with pytest.raises(UnguardedMergeError, match="use_merge=False"):
             guard.should_accept(clean_proposal, merged_state)
 
     def test_names_the_merged_candidate(
         self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
     ) -> None:
-        with pytest.raises(RuntimeError, match="candidate 3"):
+        with pytest.raises(UnguardedMergeError, match="candidate 3") as error:
             guard.should_accept(clean_proposal, merged_state)
+        assert error.value.candidate == 3
 
     def test_reflective_candidates_pass(
         self, guard: GuardedAcceptance, clean_proposal: Any, reflective_state: Any
@@ -311,6 +339,6 @@ class TestMerges:
     def test_stop_is_not_counted(
         self, guard: GuardedAcceptance, clean_proposal: Any, merged_state: Any
     ) -> None:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(UnguardedMergeError):
             guard.should_accept(clean_proposal, merged_state)
         assert guard.stats.proposals == 0
