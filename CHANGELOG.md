@@ -2,16 +2,17 @@
 
 ## Unreleased
 
-* Required binary protected scores and counted the vetoes that override the base criterion, to match the paper
-* Added `FloorConfig.batch_size` and `ProtectedFloor.from_adapter` to score floor rows in batches through a gepa adapter
-* Settled the public API: regressions name their `row` and gepa `data_id`, merges raise `UnguardedMergeError`, and `base` and `evaluate` are typed as `BaseCriterion` and `Evaluator`
-* Rejected misspelled or mismatched protected names and counted the protected passes the guard checked
-* Used a clearer changelog layout and named the CI test jobs by gepa version
-* Made the guard and the floor thread-safe and stopped the run on gepa merges
+* Added the README with a quick start, run record and citation
+* Required binary protected scores and counted vetoes that override the base criterion
+* Added `FloorConfig.batch_size` and `ProtectedFloor.from_adapter` for batched floor scoring
+* Settled the public API with `data_id`, `UnguardedMergeError`, `BaseCriterion` and `Evaluator`
+* Rejected misspelled or mismatched protected names and counted checked passes
+* Clarified the changelog layout and named CI test jobs by gepa version
+* Made the guard and floor thread-safe and raised on gepa merges
 * Added the license, authors and maintainers to the package metadata
-* Adopted Contributor Covenant 3.0 as the code of conduct
+* Adopted the Contributor Covenant 3.0 code of conduct
 * Released gepa-guard under the MIT license
-* Added the release, upstream gepa and Scorecard workflows and the repository policies
-* Added tests against gepa's non-regression rule and real `gepa.optimize` runs
-* Added `GuardedAcceptance`, `ProtectedFloor`, `FloorConfig`, `VetoStats`, `Regression` and `FloorRegression`
+* Added release, upstream and Scorecard workflows and repository policies
+* Tested against gepa's non-regression rule and real `gepa.optimize` runs
+* Added `GuardedAcceptance` and `ProtectedFloor` with their config and records
 * Set up the project with uv, ruff, ty, pytest and CI
