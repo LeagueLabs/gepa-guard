@@ -1,6 +1,6 @@
 [project]
 name = "gepa-guard"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Non-regression acceptance for GEPA reflective prompt optimization"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,7 @@ maintainers = [
     {name = "Mia Ojeda", email = "eojeda@league.com"},
     {name = "League Inc.", email = "open-source-devs@league.com"},
 ]
-requires-python = ">=3.11,<3.16"
+requires-python = ">=3.11"
 dependencies = ["gepa>=0.1.4"]
 keywords = ["gepa", "prompt optimization", "llm", "safety", "non-regression"]
 classifiers = [
@@ -31,9 +31,17 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.urls]
+Source = "https://github.com/LeagueLabs/gepa-guard"
+Issues = "https://github.com/LeagueLabs/gepa-guard/issues"
+Changelog = "https://github.com/LeagueLabs/gepa-guard/blob/main/CHANGELOG.md"
+
 [build-system]
 requires = ["uv_build>=0.12.5,<0.14.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["tests/**"]
 
 [dependency-groups]
 dev = ["pytest", "pytest-cov", "ruff", "ty"]

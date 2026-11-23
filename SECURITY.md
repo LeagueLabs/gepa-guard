@@ -24,7 +24,7 @@ not receive fixes. If you use an older version of gepa-guard, upgrade to the
 latest release to receive security updates.
 
 > [!NOTE]
-> The current supported release line is 0.x (latest: 0.1.0).
+> The current supported release line is 0.x.
 
 When you report a potential vulnerability, confirm that it reproduces with the
 latest release.

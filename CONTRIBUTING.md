@@ -105,10 +105,10 @@ This applies to documentation, docstrings and comments.
 
 - Add a dependency only when the standard library cannot do the job well.
 - Add it with `uv add` or `uv add --dev`. Commit `uv.lock` with the change.
-- Do not pin versions in `pyproject.toml`. `uv.lock` records exact versions.
-  The lower bound on gepa is the one exception. It names the oldest gepa
-  release this library supports. When you change it, change the `"0.1.4"`
-  entry of the `gepa` matrix in `.github/workflows/ci.yml` too.
+- Do not pin dependency versions in `pyproject.toml`. `uv.lock` records exact
+  versions. gepa has a lower bound. It names the oldest gepa release this
+  library supports. When you change it, change the `"0.1.4"` entry of the
+  `gepa` matrix in `.github/workflows/ci.yml` too.
 - The project supports Python 3.11 to 3.15.
 
 ## Compatibility with gepa
