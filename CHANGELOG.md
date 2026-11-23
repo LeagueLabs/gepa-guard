@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Published the tag's tested TestPyPI files to PyPI on GitHub release
 * Added the README with a quick start, run record and citation
 * Required binary protected scores and counted vetoes that override the base criterion
 * Added `FloorConfig.batch_size` and `ProtectedFloor.from_adapter` for batched floor scoring

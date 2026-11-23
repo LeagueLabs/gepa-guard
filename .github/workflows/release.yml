@@ -1,5 +1,9 @@
 name: Release
 
+# A `v*` tag push builds the distributions, tests them and uploads them to
+# TestPyPI. Publishing the GitHub release for that tag uploads the same files
+# to PyPI. The release run does not build again.
+
 on:
   push:
     tags: ["v*"]
@@ -16,20 +20,33 @@ concurrency:
 jobs:
   build:
     name: Build the distributions
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: false
 
-      - name: Check that the tag matches the project version
+      - name: Check the tag, the changelog and the branch
         run: |
           version=$(uv run --no-project python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          test "v$version" = "$GITHUB_REF_NAME"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the project version $version."
+            exit 1
+          fi
+          if ! grep -qE "^## ${version//./\\.}( |$)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The tag $GITHUB_REF_NAME points to a commit that is not on main."
+            exit 1
+          fi
 
       - run: uv build
       - run: uvx twine check --strict dist/*
@@ -38,7 +55,7 @@ jobs:
         with:
           name: dist
           path: dist/
-          retention-days: 1
+          retention-days: 30
           if-no-files-found: error
 
   test-built-wheel:
@@ -64,8 +81,8 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: [build, test-built-wheel]
-    if: github.event_name == 'push' && !github.event.repository.fork
+    needs: test-built-wheel
+    if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -83,10 +100,44 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
+  fetch-tag-build:
+    name: Fetch the distributions of the tag run
+    if: github.event_name == 'release' && !github.event.repository.fork
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # find the tag run and download its artifact
+    steps:
+      - name: Find the successful tag run for this commit
+        id: tag-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml \
+            --event push --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful tag run for $GITHUB_REF_NAME at $GITHUB_SHA. Push the tag and wait for its run to pass before you publish the release."
+            exit 1
+          fi
+          echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+          run-id: ${{ steps.tag-run.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
   publish-pypi:
     name: Publish to PyPI
-    needs: [build, test-built-wheel]
-    if: github.event_name == 'release' && github.event.action == 'published' && !github.event.repository.fork
+    needs: fetch-tag-build
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -100,3 +151,20 @@ jobs:
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  attach-to-release:
+    name: Attach the distributions to the release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload the distributions to the release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Upload the published distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
