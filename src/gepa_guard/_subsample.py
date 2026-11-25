@@ -1,11 +1,11 @@
 """Protected non-regression check on the minibatch of a proposal."""
 
 from collections import Counter
-from collections.abc import Hashable, Iterable, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from gepa_guard._scores import is_binary, is_pass, protected_names
+from gepa_guard._scores import is_pass, is_score, is_unscored, protected_names
 from gepa_guard.records import Regression
 
 
@@ -39,9 +39,11 @@ class SubsampleCheck:
     """Compare a parent and its candidate on the protected objectives of a minibatch.
 
     A protected objective passes only at exactly 1.0. A parent pass that the
-    candidate does not keep is a regression. Proposals whose evaluations are
-    missing or misaligned, or hold a protected score that is not 0 or 1,
-    cannot be checked.
+    candidate does not keep is a regression. A score of None means that the
+    row tests the check but has no score. Proposals whose evaluations are
+    missing or misaligned, or hold a protected score that is not 0, 1 or
+    None, cannot be checked. A proposal without regressions also cannot be
+    checked when the candidate has no score for a pass of its parent.
 
     Parameters
     ----------
@@ -80,25 +82,49 @@ class SubsampleCheck:
         if problem is not None:
             return SubsampleFinding(problem=problem)
         ids = getattr(proposal, "subsample_indices", None)
+        regressions = self._regressions(before, after, ids)
+        if not regressions and (problem := self._unscored(before, after)):
+            return SubsampleFinding(problem=problem)
         return SubsampleFinding(
-            regressions=self._regressions(before, after, ids),
-            checked=self._checked(before),
+            regressions=regressions, checked=self._checked(before, after)
         )
 
-    def _checked(self, before: Sequence[dict[str, Any]]) -> Counter[str]:
-        """Count the protected passes of the parent, per check."""
+    def _compared(
+        self, before: Sequence[dict[str, Any]], after: Sequence[dict[str, Any]]
+    ) -> Iterator[tuple[int, str, dict[str, Any]]]:
+        """Yield the row, the check and the candidate objectives of each parent pass."""
+        for index, (old, new) in enumerate(zip(before, after, strict=True)):
+            for name in self.protected:
+                if is_pass(old.get(name)):
+                    yield index, name, new
+
+    def _checked(
+        self, before: Sequence[dict[str, Any]], after: Sequence[dict[str, Any]]
+    ) -> Counter[str]:
+        """Count the parent passes that the candidate has a score for, per check."""
         return Counter(
-            name for row in before for name in self.protected if is_pass(row.get(name))
+            name
+            for _, name, new in self._compared(before, after)
+            if not is_unscored(new, name)
         )
+
+    def _unscored(
+        self, before: Sequence[dict[str, Any]], after: Sequence[dict[str, Any]]
+    ) -> str | None:
+        """Return the first parent pass that the candidate has no score for."""
+        for index, name, new in self._compared(before, after):
+            if is_unscored(new, name):
+                return f"no score for {name!r} at minibatch row {index}"
+        return None
 
     def _value_problem(self, before: Sequence[Any], after: Sequence[Any]) -> str | None:
-        """Return the first invalid row or non-binary protected score."""
+        """Return the first invalid row or protected score that is not 0, 1 or None."""
         for index, (old, new) in enumerate(zip(before, after, strict=True)):
             if not isinstance(old, dict) or not isinstance(new, dict):
                 return f"invalid objectives at minibatch row {index}"
             for name in self.protected:
                 for row in (old, new):
-                    if name in row and not is_binary(row[name]):
+                    if name in row and not is_score(row[name]):
                         return (
                             f"non-binary score {row[name]!r} for {name!r} "
                             f"at minibatch row {index}"
@@ -118,7 +144,9 @@ class SubsampleCheck:
             )
             for index, (old, new) in enumerate(zip(before, after, strict=True))
             for name in self.protected
-            if is_pass(old.get(name)) and not is_pass(new.get(name))
+            if is_pass(old.get(name))
+            and not is_pass(new.get(name))
+            and not is_unscored(new, name)
         )
 
 

@@ -2,7 +2,12 @@ from typing import Any
 
 import pytest
 
-from gepa_guard import FloorConfig, FloorRegression, ProtectedFloor
+from gepa_guard import (
+    FloorConfig,
+    FloorRegression,
+    ProtectedFloor,
+    UnscoredCheckError,
+)
 
 
 @pytest.fixture
@@ -281,3 +286,33 @@ class TestFromAdapter:
         floor = ProtectedFloor.from_adapter(silent_adapter, rows, protected)
         with pytest.raises(ValueError, match="objective_scores"):
             floor.measure(candidate("seed"))
+
+
+class TestUnscored:
+    def test_unscored_reference_case_is_not_protected(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        assert floor.measure(candidate("unscored-e1")) == {
+            "emergency": 1,
+            "encoding": 1,
+        }
+
+    def test_unscored_case_raises(self, floor: ProtectedFloor) -> None:
+        match = "no score for 'emergency' at floor row 0"
+        with pytest.raises(UnscoredCheckError, match=match):
+            floor.regressions(candidate("unscored-e1"))
+
+    def test_unscored_result_is_not_cached(self, floor: ProtectedFloor) -> None:
+        for _ in range(2):
+            with pytest.raises(UnscoredCheckError):
+                floor.regressions(candidate("unscored-e1"))
+        assert floor.evaluations == 3 + 1 + 1
+
+    def test_regression_in_the_batch_takes_precedence(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected, FloorConfig(batch_size=3))
+        floor.measure(candidate("seed"))
+        expected = (FloorRegression(2, "encoding"),)
+        assert floor.regressions(candidate("unscored-e1-breaks-x1")) == expected

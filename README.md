@@ -57,8 +57,9 @@ gepa-guard supports Python 3.11 to 3.15 and gepa 0.1.4 or later.
 
 Your gepa adapter must return `objective_scores` in its `EvaluationBatch`.
 This is a list with one mapping per row. Give each protected check a score of
-`1.0` (pass) or `0.0` (fail) on the rows that test it. Rows that do not test a
-check can leave it out.
+`1.0` (pass) or `0.0` (fail) on the rows that test it. Give `None` when a row
+tests the check but has no score, for example after an error. Rows that do not
+test a check can leave it out.
 
 The following example protects an `emergency` check in the minibatch.
 `seed`, `trainset`, `valset`, `adapter` and `reflection_lm` are your usual
@@ -124,13 +125,17 @@ For each proposal, the guard runs these checks in order. The first check that
 fails rejects the proposal.
 
 1. **Read**: the minibatch objective scores of the parent and the candidate
-   must exist and align row by row. Each protected score must be 0 or 1. If
-   not, the proposal is *unverifiable* and is rejected.
+   must exist and align row by row. Each protected score must be 0, 1 or
+   `None`. If not, the proposal is *unverifiable* and is rejected.
 2. **Minibatch**: the candidate must keep every protected pass of its parent.
 3. **Base**: the base criterion, for example `StrictImprovementAcceptance`,
    must accept.
 4. **Floor**: the candidate must keep every protected pass of the seed on the
    floor rows, when a floor is given.
+
+A missing score never counts as a pass. When the candidate has a `None` score
+for a protected pass of its parent, or of the seed on the floor, and has no
+regression, the proposal is *unverifiable* and is rejected.
 
 After a minibatch rejection, the guard still asks the base criterion. The
 answer does not change the decision. It only counts the rejections that
@@ -138,9 +143,9 @@ override GEPA.
 
 ## Requirements
 
-- **Binary protected scores.** A protected score must be 0 or 1. Only 1 is a
-  pass. Any other value makes a minibatch proposal unverifiable. On the floor,
-  it raises `ValueError`.
+- **Binary protected scores.** A protected score must be 0, 1 or `None`. Only
+  1 is a pass. Any other value makes a minibatch proposal unverifiable. On the
+  floor, it raises `ValueError`.
 - **Deterministic scores.** A check that passes and fails at random on the
   same prompt causes false rejections. Make the task model as deterministic
   as you can, for example with temperature 0.
@@ -163,7 +168,7 @@ proposal outcomes table in the paper.
 | Field | Meaning |
 |---|---|
 | `proposals`, `accepted` | Proposals decided and accepted |
-| `vetoed_unverifiable` | Rejected because the protected scores could not be read |
+| `vetoed_unverifiable` | Rejected because the protected scores could not be read, or had no score for a protected pass |
 | `vetoed_subsample` | Rejected for a protected regression in the minibatch |
 | `vetoed_by_base` | Rejected by the base criterion |
 | `vetoed_floor` | Rejected for a protected regression in the floor |

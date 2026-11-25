@@ -3,7 +3,7 @@
 from importlib.metadata import version
 
 from gepa_guard.acceptance import BaseCriterion, GuardedAcceptance
-from gepa_guard.exceptions import UnguardedMergeError
+from gepa_guard.exceptions import UnguardedMergeError, UnscoredCheckError
 from gepa_guard.floor import Evaluator, FloorConfig, ProtectedFloor
 from gepa_guard.records import FloorRegression, Regression, VetoStats
 
@@ -18,5 +18,6 @@ __all__ = [
     "ProtectedFloor",
     "Regression",
     "UnguardedMergeError",
+    "UnscoredCheckError",
     "VetoStats",
 ]

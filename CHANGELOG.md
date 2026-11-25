@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Treated a `None` protected score as not scored, never as a pass, and added `UnscoredCheckError` (PR #3)
+
 ## 0.1.0a1
 
 * Added `GuardedAcceptance`, which rejects a candidate that loses a protected pass of its parent

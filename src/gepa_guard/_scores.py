@@ -1,6 +1,6 @@
 """Rules for protected objective names and scores."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from math import isfinite
 from typing import Any
 
@@ -68,3 +68,37 @@ def is_binary(score: Any) -> bool:
         return isfinite(score) and score in (0, 1)
     except (TypeError, ValueError, OverflowError):
         return False
+
+
+def is_unscored(objectives: Mapping[str, Any], name: str) -> bool:
+    """Return whether a row tests a protected check but has no score for it.
+
+    Parameters
+    ----------
+    objectives : mapping of str to object
+        The objective scores of one row.
+    name : str
+        The protected check.
+
+    Returns
+    -------
+    bool
+        True when `name` is in `objectives` with the value None.
+    """
+    return name in objectives and objectives[name] is None
+
+
+def is_score(score: Any) -> bool:
+    """Return whether a protected score is 0, 1 or None.
+
+    Parameters
+    ----------
+    score : Any
+        The score to test.
+
+    Returns
+    -------
+    bool
+        True for None and for the values that `is_binary` accepts.
+    """
+    return score is None or is_binary(score)
