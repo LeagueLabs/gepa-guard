@@ -81,9 +81,10 @@ class ProtectedFloor:
     config : FloorConfig, optional
         Settings. The defaults of `FloorConfig` apply when omitted.
     ids : sequence of hashable or None, optional
-        The gepa data id of each row, in the order of `rows`. None marks a row
-        without an id. With ids, `regressions` can reuse known scores of a
-        candidate.
+        The gepa data id of each row in the trainset, in the order of `rows`.
+        For a list trainset, this is the position of the row in the trainset,
+        not in the valset. None marks a row that is not in the trainset. With
+        ids, `regressions` can reuse known scores of a candidate.
 
     Raises
     ------
@@ -137,8 +138,8 @@ class ProtectedFloor:
         config : FloorConfig, optional
             Settings. The defaults of `FloorConfig` apply when omitted.
         ids : sequence of hashable or None, optional
-            The gepa data id of each row, in the order of `rows`. None marks a
-            row without an id.
+            The gepa data id of each row in the trainset, in the order of
+            `rows`. None marks a row that is not in the trainset.
 
         Returns
         -------
@@ -223,6 +224,8 @@ class ProtectedFloor:
                 f"got {len(scores)} scores, expected {len(self._rows)}. "
                 "Give one objectives mapping per floor row."
             )
+        for index, objectives in enumerate(scores):
+            _check_scores(index, self.protected, objectives)
         with self._lock:
             return self._record(enumerate(scores))
 
@@ -246,7 +249,8 @@ class ProtectedFloor:
         known : mapping of hashable to mapping, optional
             Objective scores of the candidate that the caller already has,
             keyed by gepa data id. The floor uses them for its rows with the
-            same id. It ignores them when it has no ids.
+            same id. It scores a row itself when a known score of a protected
+            check is None. It ignores `known` when it has no ids.
 
         Returns
         -------
@@ -282,10 +286,9 @@ class ProtectedFloor:
     def _record(
         self, scored: Iterable[tuple[int, Mapping[str, float | None]]]
     ) -> dict[str, int]:
-        """Record the checks the reference passed on each row."""
+        """Record the checks the reference passed on each row of checked scores."""
         required: dict[int, tuple[str, ...]] = {}
         for index, objectives in scored:
-            _check_scores(index, self.protected, objectives)
             passed = tuple(
                 name for name in self.protected if is_pass(objectives.get(name))
             )
@@ -327,16 +330,19 @@ class ProtectedFloor:
         candidate: Mapping[str, str],
         known: Mapping[Any, Mapping[str, float | None]],
     ) -> tuple[FloorRegression, ...]:
-        """Return the failed checks of the first regressed row, in priority order.
+        """Return the failed checks of the first regressed row.
 
-        The rows with known scores form the first batch. Every regressed row of
-        a batch counts as a failure. Those rows are scored first for the next
+        The rows with known scores form the first batch, in row order. The
+        other rows follow in priority order. Every regressed row of a batch
+        counts as a failure. Those rows are scored first for the next
         candidate.
         """
         reused = {
             index: known[data_id]
             for data_id, index in self._row_of.items()
-            if index in required and data_id in known
+            if index in required
+            and data_id in known
+            and not any(is_unscored(known[data_id], name) for name in required[index])
         }
         if found := self._first_lost(required, reused.items()):
             return found

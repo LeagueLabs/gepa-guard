@@ -476,9 +476,12 @@ class TestKnownScores:
         with pytest.raises(ValueError, match=match):
             known_floor.regressions(candidate("holds"), {"a": {"emergency": 0.5}})
 
-    def test_unscored_known_case_raises(self, known_floor: ProtectedFloor) -> None:
-        with pytest.raises(UnscoredCheckError, match="at floor row 1"):
-            known_floor.regressions(candidate("holds"), {"b": {"emergency": None}})
+    def test_scores_a_row_with_an_unscored_known_case(
+        self, known_floor: ProtectedFloor, model: Any
+    ) -> None:
+        known = {"a": {"emergency": 1.0}, "b": {"emergency": None}}
+        assert known_floor.regressions(candidate("holds"), known) == ()
+        assert model.scored[3:] == ["e2", "x1"]
 
     def test_passes_the_ids_through_an_adapter(
         self,

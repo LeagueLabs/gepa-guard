@@ -396,6 +396,14 @@ class TestReusedScores:
         assert id_guard.should_accept(proposal, STATE)
         assert model.scored[3:] == ["e1", "e2", "x1"]
 
+    def test_scores_a_row_the_minibatch_left_unscored(
+        self, id_guard: GuardedAcceptance, make_proposal: Any, model: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": 0.0}], [{"emergency": None}])
+        proposal.subsample_indices = [10]
+        assert id_guard.should_accept(proposal, STATE)
+        assert model.scored[3:] == ["e1", "e2", "x1"]
+
     def test_scores_every_row_without_indices(
         self, id_guard: GuardedAcceptance, clean_proposal: Any, model: Any
     ) -> None:

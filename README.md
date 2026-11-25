@@ -126,9 +126,13 @@ protects the same passes that your own seed evaluation shows.
 
 When some floor rows are also in your `trainset`, give the floor the gepa data
 id of each row with `ids`. For a list `trainset`, the data id is the position
-of the row in the list. Use `None` for a row that is not in the `trainset`.
+of the row in the `trainset`. Do not use positions in the `valset`. A wrong id
+makes the floor use the scores of another row. Use `None` for a row that is
+not in the `trainset`.
 The guard then gives the floor the minibatch scores of the candidate. The floor
-uses them for its rows in the minibatch and scores only the other rows.
+uses them for its rows in the minibatch and scores only the other rows. It
+also scores a row when the minibatch has no score for one of its protected
+checks.
 
 ```python
 floor = ProtectedFloor.from_adapter(
