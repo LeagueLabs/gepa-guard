@@ -112,6 +112,47 @@ class TestAdapterFloor:
         assert keeps_emergency(optimize(guard(floor), unprotected_rows))
 
 
+class TestReusedFloorScores:
+    def run(
+        self,
+        optimize: Optimize,
+        adapter: Any,
+        all_rows: list[Any],
+        protected_rows: list[Any],
+        ids: list[int] | None,
+    ) -> tuple[dict[str, Any], list[Any], int]:
+        floor = ProtectedFloor.from_adapter(adapter, protected_rows, PROTECTED, ids=ids)
+        floor.measure({"prompt": "emergency"})
+        criterion = guard(floor)
+        result = optimize(criterion, all_rows)
+        return criterion.stats.as_dict(), result.candidates, floor.evaluations
+
+    def test_same_decisions_with_fewer_evaluations(
+        self,
+        optimize: Optimize,
+        adapter: Any,
+        all_rows: list[Any],
+        protected_rows: list[Any],
+    ) -> None:
+        scored = self.run(optimize, adapter, all_rows, protected_rows, ids=None)
+        reused = self.run(optimize, adapter, all_rows, protected_rows, ids=[0])
+        assert reused[:2] == scored[:2]
+        assert reused[2] < scored[2]
+
+    def test_measures_from_known_scores(
+        self,
+        optimize: Optimize,
+        adapter: Any,
+        protected_rows: list[Any],
+        unprotected_rows: list[Any],
+    ) -> None:
+        floor = ProtectedFloor.from_adapter(adapter, protected_rows, PROTECTED)
+        floor.measure_scores(
+            adapter.objectives(protected_rows, {"prompt": "emergency"})
+        )
+        assert keeps_emergency(optimize(guard(floor), unprotected_rows))
+
+
 class TestMerges:
     def test_unguarded_run_accepts_a_merge(
         self, optimize_with_merges: Optimize

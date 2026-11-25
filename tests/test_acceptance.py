@@ -351,3 +351,53 @@ class TestMerges:
         with pytest.raises(UnguardedMergeError):
             guard.should_accept(clean_proposal, merged_state)
         assert guard.stats.proposals == 0
+
+
+class TestReusedScores:
+    @pytest.fixture
+    def id_floor(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> ProtectedFloor:
+        floor = ProtectedFloor(model, rows, protected, ids=[10, 11, 12])
+        floor.measure({"prompt": "seed"})
+        return floor
+
+    @pytest.fixture
+    def id_guard(
+        self, accepting: Any, id_floor: ProtectedFloor, protected: tuple[str, ...]
+    ) -> GuardedAcceptance:
+        return GuardedAcceptance(accepting, protected, floor=id_floor)
+
+    def test_reuses_the_minibatch_scores(
+        self, id_guard: GuardedAcceptance, make_proposal: Any, model: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": 1.0}], [{"emergency": 1.0}])
+        proposal.subsample_indices = [10]
+        assert id_guard.should_accept(proposal, STATE)
+        assert model.scored[3:] == ["e2", "x1"]
+
+    def test_rejects_a_reused_regression(
+        self, id_guard: GuardedAcceptance, make_proposal: Any, model: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": 0.0}], [{"emergency": 0.0}])
+        proposal.subsample_indices = [10]
+        assert not id_guard.should_accept(proposal, STATE)
+        assert id_guard.stats.vetoed_floor == 1
+        assert model.scored[3:] == []
+
+    def test_scores_a_row_whose_copies_disagree(
+        self, id_guard: GuardedAcceptance, make_proposal: Any, model: Any
+    ) -> None:
+        proposal = make_proposal(
+            [{"emergency": 0.0}, {"emergency": 0.0}],
+            [{"emergency": 1.0}, {"emergency": 0.0}],
+        )
+        proposal.subsample_indices = [10, 10]
+        assert id_guard.should_accept(proposal, STATE)
+        assert model.scored[3:] == ["e1", "e2", "x1"]
+
+    def test_scores_every_row_without_indices(
+        self, id_guard: GuardedAcceptance, clean_proposal: Any, model: Any
+    ) -> None:
+        assert id_guard.should_accept(clean_proposal, STATE)
+        assert model.scored[3:] == ["e1", "e2", "x1"]

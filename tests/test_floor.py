@@ -28,6 +28,22 @@ def batched(
     return floor
 
 
+@pytest.fixture
+def known_floor(
+    model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+) -> ProtectedFloor:
+    floor = ProtectedFloor(model, rows, protected, ids=["a", "b", "c"])
+    floor.measure(candidate("seed"))
+    return floor
+
+
+@pytest.fixture
+def seed_scores(
+    table: dict[str, dict[str, dict[str, float | None]]], rows: list[dict[str, str]]
+) -> list[dict[str, float | None]]:
+    return [table["seed"][row["id"]] for row in rows]
+
+
 def candidate(text: str) -> dict[str, str]:
     return {"prompt": text}
 
@@ -316,3 +332,163 @@ class TestUnscored:
         floor.measure(candidate("seed"))
         expected = (FloorRegression(2, "encoding"),)
         assert floor.regressions(candidate("unscored-e1-breaks-x1")) == expected
+
+
+class TestMeasureScores:
+    def test_counts_cases_per_check(
+        self,
+        model: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+        seed_scores: list[dict[str, float | None]],
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        assert floor.measure_scores(seed_scores) == {"emergency": 2, "encoding": 1}
+
+    def test_calls_no_evaluator(
+        self,
+        model: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+        seed_scores: list[dict[str, float | None]],
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        floor.measure_scores(seed_scores)
+        assert (model.scored, floor.evaluations) == ([], 0)
+
+    def test_protects_the_same_cases_as_measure(
+        self,
+        floor: ProtectedFloor,
+        model: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+        seed_scores: list[dict[str, float | None]],
+    ) -> None:
+        given = ProtectedFloor(model, rows, protected)
+        given.measure_scores(seed_scores)
+        assert (given.n_rows, given.n_cases) == (floor.n_rows, floor.n_cases)
+        assert given.regressions(candidate("breaks-x1")) == floor.regressions(
+            candidate("breaks-x1")
+        )
+
+    def test_rejects_scores_of_another_length(
+        self,
+        model: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+        seed_scores: list[dict[str, float | None]],
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        with pytest.raises(ValueError, match="2 scores, expected 3"):
+            floor.measure_scores(seed_scores[:2])
+
+    def test_rejects_a_non_binary_score(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        scores = [{"emergency": 0.5}, {"emergency": 1.0}, {"encoding": 1.0}]
+        with pytest.raises(ValueError, match=r"non-binary score 0\.5 for 'emergency'"):
+            floor.measure_scores(scores)
+
+    def test_rejects_a_check_without_cases(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected)
+        scores = [{"emergency": 1.0}, {"emergency": 1.0}, {"encoding": 0.0}]
+        with pytest.raises(ValueError, match="no row of 'encoding'"):
+            floor.measure_scores(scores)
+        assert not floor.measured
+
+    def test_clears_the_cache(
+        self, floor: ProtectedFloor, seed_scores: list[dict[str, float | None]]
+    ) -> None:
+        floor.regressions(candidate("holds"))
+        floor.measure_scores(seed_scores)
+        floor.regressions(candidate("holds"))
+        assert floor.evaluations == 3 + 3 + 3
+
+
+class TestIds:
+    def test_rejects_ids_of_another_length(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        with pytest.raises(ValueError, match="one id per row"):
+            ProtectedFloor(model, rows, protected, ids=["a", "b"])
+
+    def test_rejects_repeated_ids(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        with pytest.raises(ValueError, match="unique"):
+            ProtectedFloor(model, rows, protected, ids=["a", "a", "c"])
+
+    def test_scores_rows_without_an_id(
+        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+    ) -> None:
+        floor = ProtectedFloor(model, rows, protected, ids=["a", None, None])
+        floor.measure(candidate("seed"))
+        known = {"a": {"emergency": 1.0}, None: {"emergency": 0.0}}
+        assert floor.regressions(candidate("holds"), known) == ()
+        assert model.scored[3:] == ["e2", "x1"]
+
+
+class TestKnownScores:
+    def test_skips_rows_with_known_scores(
+        self, known_floor: ProtectedFloor, model: Any
+    ) -> None:
+        known = {"a": {"emergency": 1.0}, "c": {"encoding": 1.0}}
+        assert known_floor.regressions(candidate("holds"), known) == ()
+        assert model.scored[3:] == ["e2"]
+
+    def test_counts_only_scored_rows(self, known_floor: ProtectedFloor) -> None:
+        known_floor.regressions(candidate("holds"), {"a": {"emergency": 1.0}})
+        assert known_floor.evaluations == 3 + 2
+
+    def test_finds_a_regression_without_scoring(
+        self, known_floor: ProtectedFloor, model: Any
+    ) -> None:
+        found = known_floor.regressions(candidate("holds"), {"b": {"emergency": 0.0}})
+        assert found == (FloorRegression(1, "emergency"),)
+        assert model.scored[3:] == []
+
+    def test_known_regression_counts_as_a_failure(
+        self, known_floor: ProtectedFloor, model: Any
+    ) -> None:
+        known_floor.regressions(candidate("holds"), {"c": {"encoding": 0.0}})
+        known_floor.regressions(candidate("breaks-all"))
+        assert model.scored[3:] == ["x1"]
+
+    def test_ignores_ids_the_floor_does_not_hold(
+        self, known_floor: ProtectedFloor, model: Any
+    ) -> None:
+        known_floor.regressions(candidate("holds"), {"z": {"emergency": 0.0}})
+        assert model.scored[3:] == ["e1", "e2", "x1"]
+
+    def test_floor_without_ids_scores_every_row(
+        self, floor: ProtectedFloor, model: Any
+    ) -> None:
+        floor.regressions(candidate("holds"), {"a": {"emergency": 0.0}})
+        assert model.scored[3:] == ["e1", "e2", "x1"]
+
+    def test_rejects_a_non_binary_known_score(
+        self, known_floor: ProtectedFloor
+    ) -> None:
+        match = r"non-binary score 0\.5 for 'emergency' at floor row 0"
+        with pytest.raises(ValueError, match=match):
+            known_floor.regressions(candidate("holds"), {"a": {"emergency": 0.5}})
+
+    def test_unscored_known_case_raises(self, known_floor: ProtectedFloor) -> None:
+        with pytest.raises(UnscoredCheckError, match="at floor row 1"):
+            known_floor.regressions(candidate("holds"), {"b": {"emergency": None}})
+
+    def test_passes_the_ids_through_an_adapter(
+        self,
+        table_adapter: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+    ) -> None:
+        floor = ProtectedFloor.from_adapter(
+            table_adapter, rows, protected, ids=["a", "b", "c"]
+        )
+        floor.measure(candidate("seed"))
+        floor.regressions(candidate("holds"), {"a": {"emergency": 1.0}})
+        assert table_adapter.model.scored[3:] == ["e2", "x1"]

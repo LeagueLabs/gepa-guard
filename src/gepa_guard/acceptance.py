@@ -2,7 +2,7 @@
 
 import threading
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -192,7 +192,9 @@ class GuardedAcceptance:
         """Check the floor for a proposal the other checks accepted."""
         try:
             regressions = (
-                self.floor.regressions(proposal.candidate)
+                self.floor.regressions(
+                    proposal.candidate, _minibatch_scores(proposal, self.protected)
+                )
                 if self.floor is not None
                 else ()
             )
@@ -231,6 +233,27 @@ def _check_floor(floor: ProtectedFloor, protected: tuple[str, ...]) -> None:
             f"the floor protects {floor.protected} but the guard protects "
             f"{protected}. Use the same names."
         )
+
+
+def _minibatch_scores(
+    proposal: Any, protected: Sequence[str]
+) -> dict[Hashable, dict[str, Any]]:
+    """Return the protected minibatch scores of the candidate by gepa data id.
+
+    A data id whose copies in the minibatch have different scores is left out.
+    """
+    ids = getattr(proposal, "subsample_indices", None)
+    if ids is None:
+        return {}
+    scores: dict[Hashable, dict[str, Any]] = {}
+    conflicts: set[Hashable] = set()
+    for data_id, objectives in zip(
+        ids, proposal.eval_after.objective_scores, strict=True
+    ):
+        view = {name: objectives[name] for name in protected if name in objectives}
+        if scores.setdefault(data_id, view) != view:
+            conflicts.add(data_id)
+    return {key: view for key, view in scores.items() if key not in conflicts}
 
 
 def _merged_candidate(state: Any) -> int | None:
