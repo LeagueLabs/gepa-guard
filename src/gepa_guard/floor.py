@@ -2,7 +2,7 @@
 
 import threading
 from collections import Counter
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, Self
 
@@ -80,12 +80,17 @@ class ProtectedFloor:
         Objective names to protect.
     config : FloorConfig, optional
         Settings. The defaults of `FloorConfig` apply when omitted.
+    ids : sequence of hashable or None, optional
+        The gepa data id of each row in the trainset, in the order of `rows`.
+        For a list trainset, the id is the position in the trainset. None marks
+        a row that is not in the trainset.
 
     Raises
     ------
     ValueError
         If `protected` is a string, holds no names, or holds an empty or
-        non-string name.
+        non-string name. Also if `ids` does not hold one id per row, or holds
+        an id more than once.
     """
 
     def __init__(
@@ -94,11 +99,13 @@ class ProtectedFloor:
         rows: Sequence[Any],
         protected: Iterable[str],
         config: FloorConfig | None = None,
+        ids: Sequence[Hashable | None] | None = None,
     ) -> None:
         self.protected = protected_names(protected)
         self.config = config if config is not None else FloorConfig()
         self._evaluate = evaluate
         self._rows = tuple(rows)
+        self._row_of = _row_index(ids, len(self._rows))
         self._required: dict[int, tuple[str, ...]] | None = None
         self._failures: Counter[int] = Counter()
         self._cache: dict[str, tuple[FloorRegression, ...]] = {}
@@ -112,6 +119,7 @@ class ProtectedFloor:
         rows: Sequence[Any],
         protected: Iterable[str],
         config: FloorConfig | None = None,
+        ids: Sequence[Hashable | None] | None = None,
     ) -> Self:
         """Build a floor that scores rows with a gepa adapter.
 
@@ -128,13 +136,17 @@ class ProtectedFloor:
             Objective names to protect.
         config : FloorConfig, optional
             Settings. The defaults of `FloorConfig` apply when omitted.
+        ids : sequence of hashable or None, optional
+            The gepa data id of each row in the trainset, in the order of
+            `rows`. For a list trainset, the id is the position in the
+            trainset. None marks a row that is not in the trainset.
 
         Returns
         -------
         ProtectedFloor
             An unmeasured floor.
         """
-        return cls(_AdapterEvaluator(adapter), rows, protected, config)
+        return cls(_AdapterEvaluator(adapter), rows, protected, config, ids)
 
     @property
     def measured(self) -> bool:
@@ -181,10 +193,50 @@ class ProtectedFloor:
         with self._lock:
             return self._measure(reference)
 
-    def regressions(self, candidate: Mapping[str, str]) -> tuple[FloorRegression, ...]:
+    def measure_scores(
+        self, scores: Sequence[Mapping[str, float | None]]
+    ) -> dict[str, int]:
+        """Record the checks the reference passed, from scores the caller has.
+
+        The floor does not call the evaluator.
+
+        Parameters
+        ----------
+        scores : sequence of mapping of str to float or None
+            The objective scores of the reference. One mapping per row, in the
+            order of the floor rows.
+
+        Returns
+        -------
+        dict of str to int
+            Recorded cases per protected check.
+
+        Raises
+        ------
+        ValueError
+            If `scores` does not hold one mapping per row, if a protected score
+            is not 0, 1 or None, or if the reference passes no row of a
+            protected check. The floor then keeps its earlier state.
+        """
+        if len(scores) != len(self._rows):
+            raise ValueError(
+                f"got {len(scores)} scores, expected {len(self._rows)}. "
+                "Give one objectives mapping per floor row."
+            )
+        for index, objectives in enumerate(scores):
+            _check_scores(index, self.protected, objectives)
+        with self._lock:
+            return self._record(enumerate(scores))
+
+    def regressions(
+        self,
+        candidate: Mapping[str, str],
+        known: Mapping[Any, Mapping[str, float | None]] | None = None,
+    ) -> tuple[FloorRegression, ...]:
         """Return the protected checks the reference passed and the candidate fails.
 
-        Rows are scored in batches of `FloorConfig.batch_size`. Scoring stops
+        Rows with known scores are checked first and are not scored. Other
+        rows are scored in batches of `FloorConfig.batch_size`. Checking stops
         after the first batch with a regression or a missing score. Rows that
         regressed before are scored first. A result with a missing score is not
         cached.
@@ -193,6 +245,10 @@ class ProtectedFloor:
         ----------
         candidate : mapping of str to str
             The candidate to check.
+        known : mapping of hashable to mapping of str to float or None, optional
+            Objective scores of the candidate, keyed by gepa data id. The floor
+            uses them for its rows with the same id. It scores a row when a
+            known protected score of the row is None.
 
         Returns
         -------
@@ -208,25 +264,34 @@ class ProtectedFloor:
             If the first such batch has no regression and has no score for a
             check that the reference passed.
         ValueError
-            If `evaluate` returns the wrong number of results or a protected
-            score that is not 0, 1 or None.
+            If `evaluate` returns the wrong number of results, or if a scored
+            or known protected score is not 0, 1 or None.
         """
         with self._lock:
-            return self._regressions(candidate)
+            return self._regressions(candidate, known or {})
 
     def _measure(self, reference: Mapping[str, str]) -> dict[str, int]:
         """Score every row with the reference and record the checks it passed."""
-        required: dict[int, tuple[str, ...]] = {}
+        scored: list[tuple[int, Mapping[str, float | None]]] = []
         for batch in self._batches(range(len(self._rows))):
             for index, objectives in zip(
                 batch, self._score(batch, reference), strict=True
             ):
                 _check_scores(index, self.protected, objectives)
-                passed = tuple(
-                    name for name in self.protected if is_pass(objectives.get(name))
-                )
-                if passed:
-                    required[index] = passed
+                scored.append((index, objectives))
+        return self._record(scored)
+
+    def _record(
+        self, scored: Iterable[tuple[int, Mapping[str, float | None]]]
+    ) -> dict[str, int]:
+        """Record the checks the reference passed, from validated scores."""
+        required: dict[int, tuple[str, ...]] = {}
+        for index, objectives in scored:
+            passed = tuple(
+                name for name in self.protected if is_pass(objectives.get(name))
+            )
+            if passed:
+                required[index] = passed
         counts = {
             name: sum(name in checks for checks in required.values())
             for name in self.protected
@@ -242,44 +307,76 @@ class ProtectedFloor:
         self._cache.clear()
         return counts
 
-    def _regressions(self, candidate: Mapping[str, str]) -> tuple[FloorRegression, ...]:
+    def _regressions(
+        self,
+        candidate: Mapping[str, str],
+        known: Mapping[Any, Mapping[str, float | None]],
+    ) -> tuple[FloorRegression, ...]:
         """Return the regressions of a candidate, from the cache when possible."""
         if self._required is None:
             raise RuntimeError("call measure() with a reference candidate first")
         key = candidate_fingerprint(candidate)
         if key in self._cache:
             return self._cache[key]
-        found = self._first_regression(self._required, candidate)
+        found = self._first_regression(self._required, candidate, known)
         self._remember(key, found)
         return found
 
     def _first_regression(
-        self, required: Mapping[int, tuple[str, ...]], candidate: Mapping[str, str]
+        self,
+        required: Mapping[int, tuple[str, ...]],
+        candidate: Mapping[str, str],
+        known: Mapping[Any, Mapping[str, float | None]],
     ) -> tuple[FloorRegression, ...]:
-        """Return the failed checks of the first regressed row, in priority order.
+        """Return the failed checks of the first regressed row.
 
-        Every regressed row of the scored batch counts as a failure. Those rows
-        are scored first for the next candidate.
+        Rows with known scores come first, in row order. Scored rows follow in
+        priority order. A regressed row is checked first for the next candidate.
         """
-        order = sorted(required, key=lambda row: (-self._failures[row], row))
+        reused = {
+            index: known[data_id]
+            for data_id, index in self._row_of.items()
+            if index in required
+            and data_id in known
+            and not any(is_unscored(known[data_id], name) for name in required[index])
+        }
+        if found := self._first_lost(required, reused.items()):
+            return found
+        order = sorted(
+            (row for row in required if row not in reused),
+            key=lambda row: (-self._failures[row], row),
+        )
         for batch in self._batches(order):
-            regressed, unscored = [], []
-            for index, objectives in zip(
-                batch, self._score(batch, candidate), strict=True
-            ):
-                _check_scores(index, self.protected, objectives)
-                if found := _lost(index, required[index], objectives):
-                    regressed.append(found)
-                unscored.extend(
-                    UnscoredCheckError(index, name)
-                    for name in required[index]
-                    if is_unscored(objectives, name)
-                )
-            self._failures.update(found[0].row for found in regressed)
-            if regressed:
-                return regressed[0]
-            if unscored:
-                raise unscored[0]
+            scored = zip(batch, self._score(batch, candidate), strict=True)
+            if found := self._first_lost(required, scored):
+                return found
+        return ()
+
+    def _first_lost(
+        self,
+        required: Mapping[int, tuple[str, ...]],
+        batch: Iterable[tuple[int, Mapping[str, float | None]]],
+    ) -> tuple[FloorRegression, ...]:
+        """Return the failed checks of the first regressed row of one batch.
+
+        Raises `UnscoredCheckError` when the batch has no regression and has
+        no score for a required check.
+        """
+        regressed, unscored = [], []
+        for index, objectives in batch:
+            _check_scores(index, self.protected, objectives)
+            if found := _lost(index, required[index], objectives):
+                regressed.append(found)
+            unscored.extend(
+                UnscoredCheckError(index, name)
+                for name in required[index]
+                if is_unscored(objectives, name)
+            )
+        self._failures.update(found[0].row for found in regressed)
+        if regressed:
+            return regressed[0]
+        if unscored:
+            raise unscored[0]
         return ()
 
     def _batches(self, indices: Sequence[int]) -> Iterator[Sequence[int]]:
@@ -307,6 +404,23 @@ class ProtectedFloor:
         if len(self._cache) >= self.config.cache_size:
             del self._cache[next(iter(self._cache))]
         self._cache[key] = found
+
+
+def _row_index(
+    ids: Sequence[Hashable | None] | None, n_rows: int
+) -> dict[Hashable, int]:
+    """Return the row index of each gepa data id."""
+    if ids is None:
+        return {}
+    if len(ids) != n_rows:
+        raise ValueError(f"ids must hold one id per row, got {len(ids)} for {n_rows}")
+    named = [
+        (data_id, index) for index, data_id in enumerate(ids) if data_id is not None
+    ]
+    row_of = dict(named)
+    if len(row_of) != len(named):
+        raise ValueError("ids must be unique")
+    return row_of
 
 
 def _lost(

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Added `measure_scores` and row `ids` to the floor to reuse known scores (PR #4)
 * Treated a `None` protected score as not scored, never as a pass, and added `UnscoredCheckError` (PR #3)
 
 ## 0.1.0a1

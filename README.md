@@ -119,6 +119,27 @@ To score the floor without an adapter, use
 `ProtectedFloor(evaluate, rows, protected=[...])`. `evaluate` takes a sequence
 of rows and a candidate, and returns one objective mapping per row.
 
+If you already have the seed scores of the floor rows, use
+`floor.measure_scores(scores)` instead of `floor.measure(seed)`. It takes one
+objective mapping per row and does not score the seed again. The floor then
+protects the same passes that your own seed evaluation shows.
+
+When some floor rows are also in your `trainset`, give the floor the gepa data
+id of each row with `ids`. For a list `trainset`, the data id is the position
+of the row in the `trainset`. Do not use positions in the `valset`. A wrong id
+makes the floor use the scores of another row. Use `None` for a row that is
+not in the `trainset`.
+The guard then gives the floor the minibatch scores of the candidate. The floor
+uses them for its rows in the minibatch and scores only the other rows. It
+also scores a row when the minibatch has no score for one of its protected
+checks.
+
+```python
+floor = ProtectedFloor.from_adapter(
+    adapter, protected_rows, protected=["emergency"], ids=[0, 4, None]
+)
+```
+
 ## How it works
 
 For each proposal, the guard runs these checks in order. The first check that
