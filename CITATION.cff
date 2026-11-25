@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software in your work, please cite it as below."
+type: software
+title: "gepa-guard"
+abstract: "Non-regression acceptance for GEPA reflective prompt optimization."
+authors:
+  - family-names: "Barreto-Ojeda"
+    given-names: "Estefania"
+    orcid: "https://orcid.org/0000-0002-1288-737X"
+  - name: "League Inc."
+version: 0.1.0a1
+license: MIT
+url: "https://github.com/LeagueLabs/gepa-guard"
+repository-code: "https://github.com/LeagueLabs/gepa-guard"
+keywords:
+  - gepa
+  - prompt optimization
+  - llm
+  - safety
+  - non-regression
+preferred-citation:
+  type: conference-paper
+  title: "Demo: Blocking Silent Safety Regressions in Prompt Optimization for Health AI"
+  authors:
+    - family-names: "Barreto-Ojeda"
+      given-names: "Estefania"
+      orcid: "https://orcid.org/0000-0002-1288-737X"
+    - family-names: "Arnold"
+      given-names: "Aiden"
+  collection-title: "The Third Workshop on GenAI for Health: Agentic Systems, Clinical Trust, and Future Potential - Demonstration Paper Track"
+  conference:
+    name: "GenAI for Health Workshop at NeurIPS 2026"
+  year: 2026
+  url: "https://openreview.net/forum?id=3iBtYkwQSc"

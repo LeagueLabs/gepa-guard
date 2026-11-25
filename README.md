@@ -195,6 +195,7 @@ If you use gepa-guard in your research, please cite the paper:
   author    = {Estefania Barreto-Ojeda and Aiden Arnold},
   booktitle = {The Third Workshop on GenAI for Health: Agentic Systems, Clinical Trust, and Future Potential - Demonstration Paper Track},
   year      = {2026},
+  url       = {https://openreview.net/forum?id=3iBtYkwQSc},
 }
 ```
 
