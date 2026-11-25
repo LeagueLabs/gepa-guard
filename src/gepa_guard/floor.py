@@ -82,9 +82,8 @@ class ProtectedFloor:
         Settings. The defaults of `FloorConfig` apply when omitted.
     ids : sequence of hashable or None, optional
         The gepa data id of each row in the trainset, in the order of `rows`.
-        For a list trainset, this is the position of the row in the trainset,
-        not in the valset. None marks a row that is not in the trainset. With
-        ids, `regressions` can reuse known scores of a candidate.
+        For a list trainset, the id is the position in the trainset. None marks
+        a row that is not in the trainset.
 
     Raises
     ------
@@ -139,7 +138,8 @@ class ProtectedFloor:
             Settings. The defaults of `FloorConfig` apply when omitted.
         ids : sequence of hashable or None, optional
             The gepa data id of each row in the trainset, in the order of
-            `rows`. None marks a row that is not in the trainset.
+            `rows`. For a list trainset, the id is the position in the
+            trainset. None marks a row that is not in the trainset.
 
         Returns
         -------
@@ -198,8 +198,7 @@ class ProtectedFloor:
     ) -> dict[str, int]:
         """Record the checks the reference passed, from scores the caller has.
 
-        The floor does not call the evaluator. Use this method when the
-        reference was already scored on the floor rows, for example the seed.
+        The floor does not call the evaluator.
 
         Parameters
         ----------
@@ -246,11 +245,10 @@ class ProtectedFloor:
         ----------
         candidate : mapping of str to str
             The candidate to check.
-        known : mapping of hashable to mapping, optional
-            Objective scores of the candidate that the caller already has,
-            keyed by gepa data id. The floor uses them for its rows with the
-            same id. It scores a row itself when a known score of a protected
-            check is None. It ignores `known` when it has no ids.
+        known : mapping of hashable to mapping of str to float or None, optional
+            Objective scores of the candidate, keyed by gepa data id. The floor
+            uses them for its rows with the same id. It scores a row when a
+            known protected score of the row is None.
 
         Returns
         -------
@@ -266,8 +264,8 @@ class ProtectedFloor:
             If the first such batch has no regression and has no score for a
             check that the reference passed.
         ValueError
-            If `evaluate` returns the wrong number of results or a protected
-            score that is not 0, 1 or None.
+            If `evaluate` returns the wrong number of results, or if a scored
+            or known protected score is not 0, 1 or None.
         """
         with self._lock:
             return self._regressions(candidate, known or {})
@@ -286,7 +284,7 @@ class ProtectedFloor:
     def _record(
         self, scored: Iterable[tuple[int, Mapping[str, float | None]]]
     ) -> dict[str, int]:
-        """Record the checks the reference passed on each row of checked scores."""
+        """Record the checks the reference passed, from validated scores."""
         required: dict[int, tuple[str, ...]] = {}
         for index, objectives in scored:
             passed = tuple(
@@ -332,10 +330,8 @@ class ProtectedFloor:
     ) -> tuple[FloorRegression, ...]:
         """Return the failed checks of the first regressed row.
 
-        The rows with known scores form the first batch, in row order. The
-        other rows follow in priority order. Every regressed row of a batch
-        counts as a failure. Those rows are scored first for the next
-        candidate.
+        Rows with known scores come first, in row order. Scored rows follow in
+        priority order. A regressed row is checked first for the next candidate.
         """
         reused = {
             index: known[data_id]

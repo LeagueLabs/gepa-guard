@@ -64,7 +64,8 @@ class GuardedAcceptance:
     protected : iterable of str
         Objective names to protect in the minibatch.
     floor : ProtectedFloor, optional
-        Measured floor that accepted candidates must hold.
+        Measured floor that accepted candidates must hold. The guard gives it
+        the minibatch scores of the candidate.
 
     Attributes
     ----------
