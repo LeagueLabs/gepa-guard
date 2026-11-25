@@ -163,6 +163,15 @@ class TestShouldAccept:
         assert (guard.stats.vetoed_floor, guard.stats.regressed["emergency"]) == (1, 1)
         assert guard.stats.overrode_base == 1
 
+    def test_unscored_floor_case_is_unverifiable(
+        self, guard: GuardedAcceptance, make_proposal: Any
+    ) -> None:
+        proposal = make_proposal([{}], [{}], text="unscored-e1")
+        assert not guard.should_accept(proposal, STATE)
+        assert (guard.stats.vetoed_unverifiable, guard.stats.vetoed_floor) == (1, 0)
+        expected = "could not be verified (no score for 'emergency' at floor row 0)"
+        assert expected in guard.reject_reason(proposal, STATE)
+
     def test_counts_every_proposal(
         self, guard: GuardedAcceptance, clean_proposal: Any, regressed_proposal: Any
     ) -> None:

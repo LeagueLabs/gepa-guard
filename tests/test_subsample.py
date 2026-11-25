@@ -170,3 +170,41 @@ class TestUnverifiable:
     ) -> None:
         delattr(minimal_proposal.eval_after, name)
         assert check.inspect(minimal_proposal).problem is not None
+
+
+class TestUnscored:
+    def test_unscored_parent_pass_is_unverifiable(
+        self, check: SubsampleCheck, make_proposal: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": 1.0}], [{"emergency": None}])
+        expected = "no score for 'emergency' at minibatch row 0"
+        assert check.inspect(proposal).problem == expected
+
+    @pytest.mark.parametrize("before", [{}, {"emergency": 0.0}, {"emergency": None}])
+    def test_unscored_without_parent_pass_is_clean(
+        self, check: SubsampleCheck, make_proposal: Any, before: dict[str, Any]
+    ) -> None:
+        proposal = make_proposal([before], [{"emergency": None}])
+        assert check.inspect(proposal).clean
+
+    def test_unscored_parent_is_not_a_pass(
+        self, check: SubsampleCheck, make_proposal: Any
+    ) -> None:
+        proposal = make_proposal([{"emergency": None}], [{"emergency": 0.0}])
+        assert check.inspect(proposal).clean
+
+    def test_regression_takes_precedence(
+        self, check: SubsampleCheck, regressed_proposal: Any
+    ) -> None:
+        regressed_proposal.eval_after.objective_scores[0] = {"emergency": None}
+        finding = check.inspect(regressed_proposal)
+        assert (finding.problem, finding.regressions) == (
+            None,
+            (Regression(1, "emergency"),),
+        )
+
+    def test_unscored_pass_is_not_checked(
+        self, check: SubsampleCheck, regressed_proposal: Any
+    ) -> None:
+        regressed_proposal.eval_after.objective_scores[0] = {"emergency": None}
+        assert check.inspect(regressed_proposal).checked == Counter(emergency=1)

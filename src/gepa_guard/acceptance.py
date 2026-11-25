@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from gepa_guard._subsample import SubsampleCheck
-from gepa_guard.exceptions import UnguardedMergeError
+from gepa_guard.exceptions import UnguardedMergeError, UnscoredCheckError
 from gepa_guard.floor import ProtectedFloor
 from gepa_guard.records import FloorRegression, Regression, VetoStats
 
@@ -47,12 +47,14 @@ class GuardedAcceptance:
     """Acceptance criterion that rejects any candidate that breaks a protected check.
 
     The checks run in this order. The protected checks must be readable, with
-    scores of 0 or 1. The candidate must keep every protected pass of its
-    parent in the minibatch. The base criterion must accept. The candidate
+    scores of 0, 1 or None. The candidate must keep every protected pass of
+    its parent in the minibatch. The base criterion must accept. The candidate
     must hold the floor, when one is given. The first check that fails rejects
-    the candidate. After a minibatch veto, the guard still asks the base
-    criterion, only to count in `stats` the vetoes that override it. Calls
-    from several threads run one at a time.
+    the candidate. A score of None means that a row tests a check but has no
+    score. A missing score for a pass of the parent or the reference, with no
+    regression, makes the proposal unverifiable. After a minibatch veto, the
+    guard still asks the base criterion, only to count in `stats` the vetoes
+    that override it. Calls from several threads run one at a time.
 
     Parameters
     ----------
@@ -170,7 +172,7 @@ class GuardedAcceptance:
         problem = finding.problem or self._floor_problem(proposal)
         if problem is not None:
             self.stats.vetoed_unverifiable += 1
-            reason = f"rejected: protected checks could not be verified ({problem})"
+            reason = _unverifiable_reason(problem)
             return _Decision(proposal, False, reason)
         self.stats.checked.update(finding.checked)
         if finding.regressions:
@@ -188,9 +190,15 @@ class GuardedAcceptance:
 
     def _decide_floor(self, proposal: Any) -> _Decision:
         """Check the floor for a proposal the other checks accepted."""
-        regressions = (
-            self.floor.regressions(proposal.candidate) if self.floor is not None else ()
-        )
+        try:
+            regressions = (
+                self.floor.regressions(proposal.candidate)
+                if self.floor is not None
+                else ()
+            )
+        except UnscoredCheckError as error:
+            self.stats.vetoed_unverifiable += 1
+            return _Decision(proposal, False, _unverifiable_reason(str(error)))
         if regressions:
             self.stats.vetoed_floor += 1
             self.stats.regressed.update(regression.check for regression in regressions)
@@ -245,6 +253,11 @@ def _minibatch_reason(regressions: Sequence[Regression]) -> str:
 def _data_id_note(regression: Regression) -> str:
     """Describe the dataset id of a regression, when it is known."""
     return "" if regression.data_id is None else f" (data id {regression.data_id})"
+
+
+def _unverifiable_reason(problem: str) -> str:
+    """Describe why the protected checks of a proposal could not be verified."""
+    return f"rejected: protected checks could not be verified ({problem})"
 
 
 def _floor_reason(regressions: Sequence[FloorRegression]) -> str:

@@ -52,7 +52,8 @@ class VetoStats:
     accepted : int
         Proposals accepted.
     vetoed_unverifiable : int
-        Proposals rejected because their protected checks could not be read.
+        Proposals rejected because their protected checks could not be read,
+        or had no score for a pass of the parent or the reference.
     vetoed_subsample : int
         Proposals rejected for a protected regression in the minibatch.
     vetoed_floor : int

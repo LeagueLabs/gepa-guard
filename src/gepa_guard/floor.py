@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol, Self
 
 from gepa_guard._fingerprint import candidate_fingerprint
-from gepa_guard._scores import is_binary, is_pass, protected_names
+from gepa_guard._scores import is_pass, is_score, is_unscored, protected_names
+from gepa_guard.exceptions import UnscoredCheckError
 from gepa_guard.records import FloorRegression
 
 
@@ -16,7 +17,7 @@ class Evaluator(Protocol):
 
     def __call__(
         self, rows: Sequence[Any], candidate: Mapping[str, str], /
-    ) -> Sequence[Mapping[str, float]]:
+    ) -> Sequence[Mapping[str, float | None]]:
         """Return the objective scores of each row.
 
         Parameters
@@ -28,9 +29,10 @@ class Evaluator(Protocol):
 
         Returns
         -------
-        sequence of mapping of str to float
+        sequence of mapping of str to float or None
             One mapping of objective name to score per row, in the order of
-            `rows`. A protected score is 0 or 1.
+            `rows`. A protected score is 0, 1 or None. None means that the row
+            tests the check but has no score, for example after an error.
         """
 
 
@@ -174,7 +176,7 @@ class ProtectedFloor:
         ValueError
             If the reference passes no row of a protected check, or if
             `evaluate` returns the wrong number of results or a protected
-            score that is not 0 or 1. The floor then keeps its earlier state.
+            score that is not 0, 1 or None. The floor then keeps its earlier state.
         """
         with self._lock:
             return self._measure(reference)
@@ -183,8 +185,9 @@ class ProtectedFloor:
         """Return the protected checks the reference passed and the candidate fails.
 
         Rows are scored in batches of `FloorConfig.batch_size`. Scoring stops
-        after the first batch with a regression. Rows that regressed before are
-        scored first.
+        after the first batch with a regression or a missing score. Rows that
+        regressed before are scored first. A result with a missing score is not
+        cached.
 
         Parameters
         ----------
@@ -201,9 +204,12 @@ class ProtectedFloor:
         ------
         RuntimeError
             If `measure` was not called first.
+        UnscoredCheckError
+            If the first such batch has no regression and has no score for a
+            check that the reference passed.
         ValueError
             If `evaluate` returns the wrong number of results or a protected
-            score that is not 0 or 1.
+            score that is not 0, 1 or None.
         """
         with self._lock:
             return self._regressions(candidate)
@@ -215,7 +221,7 @@ class ProtectedFloor:
             for index, objectives in zip(
                 batch, self._score(batch, reference), strict=True
             ):
-                _check_binary(index, self.protected, objectives)
+                _check_scores(index, self.protected, objectives)
                 passed = tuple(
                     name for name in self.protected if is_pass(objectives.get(name))
                 )
@@ -257,16 +263,23 @@ class ProtectedFloor:
         """
         order = sorted(required, key=lambda row: (-self._failures[row], row))
         for batch in self._batches(order):
-            regressed = []
+            regressed, unscored = [], []
             for index, objectives in zip(
                 batch, self._score(batch, candidate), strict=True
             ):
-                _check_binary(index, self.protected, objectives)
+                _check_scores(index, self.protected, objectives)
                 if found := _lost(index, required[index], objectives):
                     regressed.append(found)
+                unscored.extend(
+                    UnscoredCheckError(index, name)
+                    for name in required[index]
+                    if is_unscored(objectives, name)
+                )
             self._failures.update(found[0].row for found in regressed)
             if regressed:
                 return regressed[0]
+            if unscored:
+                raise unscored[0]
         return ()
 
     def _batches(self, indices: Sequence[int]) -> Iterator[Sequence[int]]:
@@ -277,7 +290,7 @@ class ProtectedFloor:
 
     def _score(
         self, indices: Sequence[int], candidate: Mapping[str, str]
-    ) -> Sequence[Mapping[str, float]]:
+    ) -> Sequence[Mapping[str, float | None]]:
         """Score a batch of rows with one call to `evaluate`."""
         self._evaluations += len(indices)
         scored = self._evaluate([self._rows[index] for index in indices], candidate)
@@ -297,22 +310,22 @@ class ProtectedFloor:
 
 
 def _lost(
-    row: int, checks: Sequence[str], objectives: Mapping[str, float]
+    row: int, checks: Sequence[str], objectives: Mapping[str, float | None]
 ) -> tuple[FloorRegression, ...]:
     """Return the protected checks of a row that the candidate failed."""
     return tuple(
         FloorRegression(row=row, check=check)
         for check in checks
-        if not is_pass(objectives.get(check))
+        if not is_pass(objectives.get(check)) and not is_unscored(objectives, check)
     )
 
 
-def _check_binary(
-    row: int, names: Iterable[str], objectives: Mapping[str, float]
+def _check_scores(
+    row: int, names: Iterable[str], objectives: Mapping[str, float | None]
 ) -> None:
-    """Raise when a protected score of a floor row is not 0 or 1."""
+    """Raise when a protected score of a floor row is not 0, 1 or None."""
     for name in names:
-        if name in objectives and not is_binary(objectives[name]):
+        if name in objectives and not is_score(objectives[name]):
             raise ValueError(
                 f"evaluate returned a non-binary score {objectives[name]!r} "
                 f"for {name!r} at floor row {row}"
@@ -327,7 +340,7 @@ class _AdapterEvaluator:
 
     def __call__(
         self, rows: Sequence[Any], candidate: Mapping[str, str], /
-    ) -> Sequence[Mapping[str, float]]:
+    ) -> Sequence[Mapping[str, float | None]]:
         """Return the objective scores the adapter gives each row."""
         result = self.adapter.evaluate(
             list(rows), dict(candidate), capture_traces=False

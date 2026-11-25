@@ -21,6 +21,7 @@ class TestPublicApi:
             "ProtectedFloor",
             "Regression",
             "UnguardedMergeError",
+            "UnscoredCheckError",
             "VetoStats",
         ]
 

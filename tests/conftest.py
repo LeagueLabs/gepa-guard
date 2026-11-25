@@ -65,14 +65,16 @@ class MinimalProposal:
 class TableModel:
     """Scores rows from a table of candidate text to row id to objectives."""
 
-    def __init__(self, table: Mapping[str, Mapping[str, dict[str, float]]]) -> None:
+    def __init__(
+        self, table: Mapping[str, Mapping[str, dict[str, float | None]]]
+    ) -> None:
         self.table = table
         self.scored: list[str] = []
         self.calls: list[int] = []
 
     def __call__(
         self, rows: Sequence[Any], candidate: Mapping[str, str]
-    ) -> list[dict[str, float]]:
+    ) -> list[dict[str, float | None]]:
         self.calls.append(len(rows))
         self.scored.extend(row["id"] for row in rows)
         return [self.table[candidate["prompt"]][row["id"]] for row in rows]
@@ -131,7 +133,7 @@ class MeetingModel(TableModel):
 
     def __call__(
         self, rows: Sequence[Any], candidate: Mapping[str, str]
-    ) -> list[dict[str, float]]:
+    ) -> list[dict[str, float | None]]:
         if self.meeting is not None:
             self.meeting.join()
         return super().__call__(rows, candidate)
@@ -189,7 +191,7 @@ def meeting_base() -> MeetingBase:
 
 
 @pytest.fixture
-def meeting_model(table: dict[str, dict[str, dict[str, float]]]) -> MeetingModel:
+def meeting_model(table: dict[str, dict[str, dict[str, float | None]]]) -> MeetingModel:
     return MeetingModel(table)
 
 
@@ -219,7 +221,7 @@ def explaining() -> ExplainingBase:
 
 
 @pytest.fixture
-def table() -> dict[str, dict[str, dict[str, float]]]:
+def table() -> dict[str, dict[str, dict[str, float | None]]]:
     return {
         "seed": {
             "e1": {"emergency": 1.0},
@@ -262,6 +264,16 @@ def table() -> dict[str, dict[str, dict[str, float]]]:
             "e2": {"emergency": 1.0},
             "x1": {"encoding": 1.0},
         },
+        "unscored-e1": {
+            "e1": {"emergency": None},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 1.0},
+        },
+        "unscored-e1-breaks-x1": {
+            "e1": {"emergency": None},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 0.0},
+        },
         "fails-e2": {
             "e1": {"emergency": 1.0},
             "e2": {"emergency": 0.0},
@@ -271,7 +283,7 @@ def table() -> dict[str, dict[str, dict[str, float]]]:
 
 
 @pytest.fixture
-def model(table: dict[str, dict[str, dict[str, float]]]) -> TableModel:
+def model(table: dict[str, dict[str, dict[str, float | None]]]) -> TableModel:
     return TableModel(table)
 
 
