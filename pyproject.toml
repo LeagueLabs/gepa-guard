@@ -1,6 +1,6 @@
 [project]
 name = "gepa-guard"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Non-regression acceptance for GEPA reflective prompt optimization"
 readme = "README.md"
 license = "MIT"
