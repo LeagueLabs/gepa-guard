@@ -304,20 +304,29 @@ class TestFromAdapter:
             floor.measure(candidate("seed"))
 
 
+UNSCORED = ["unscored-e1", "missing-e1"]
+
+
 class TestUnscored:
+    @pytest.mark.parametrize("text", UNSCORED)
     def test_unscored_reference_case_is_not_protected(
-        self, model: Any, rows: list[dict[str, str]], protected: tuple[str, ...]
+        self,
+        model: Any,
+        rows: list[dict[str, str]],
+        protected: tuple[str, ...],
+        text: str,
     ) -> None:
         floor = ProtectedFloor(model, rows, protected)
-        assert floor.measure(candidate("unscored-e1")) == {
+        assert floor.measure(candidate(text)) == {
             "emergency": 1,
             "encoding": 1,
         }
 
-    def test_unscored_case_raises(self, floor: ProtectedFloor) -> None:
+    @pytest.mark.parametrize("text", UNSCORED)
+    def test_unscored_case_raises(self, floor: ProtectedFloor, text: str) -> None:
         match = "no score for 'emergency' at floor row 0"
         with pytest.raises(UnscoredCheckError, match=match):
-            floor.regressions(candidate("unscored-e1"))
+            floor.regressions(candidate(text))
 
     def test_unscored_result_is_not_cached(self, floor: ProtectedFloor) -> None:
         for _ in range(2):
@@ -476,10 +485,11 @@ class TestKnownScores:
         with pytest.raises(ValueError, match=match):
             known_floor.regressions(candidate("holds"), {"a": {"emergency": 0.5}})
 
+    @pytest.mark.parametrize("unscored", [{"emergency": None}, {}])
     def test_scores_a_row_with_an_unscored_known_case(
-        self, known_floor: ProtectedFloor, model: Any
+        self, known_floor: ProtectedFloor, model: Any, unscored: dict[str, Any]
     ) -> None:
-        known = {"a": {"emergency": 1.0}, "b": {"emergency": None}}
+        known = {"a": {"emergency": 1.0}, "b": unscored}
         assert known_floor.regressions(candidate("holds"), known) == ()
         assert model.scored[3:] == ["e2", "x1"]
 

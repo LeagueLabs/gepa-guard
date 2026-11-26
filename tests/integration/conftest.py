@@ -24,6 +24,8 @@ ALPHA = Row("alpha")
 BETA = Row("beta")
 GAMMA = Row("gamma")
 DELTA = Row("delta")
+UNGRADED = Row("ungraded", protected=True)
+SEED = {"prompt": "emergency"}
 
 
 class KeywordAdapter:
@@ -61,6 +63,28 @@ class KeywordAdapter:
     ) -> dict[str, list[dict[str, float]]]:
         rows = [{"score": score} for score in eval_batch.scores]
         return {name: rows for name in components_to_update}
+
+
+class UngradedAdapter(KeywordAdapter):
+    """Keyword adapter that leaves out the protected scores it cannot grade.
+
+    It never grades `UNGRADED`. With `children`, it grades the protected rows
+    of the seed only.
+    """
+
+    def __init__(self, children: bool = False) -> None:
+        self.children = children
+
+    def objectives(
+        self, batch: Sequence[Row], candidate: Mapping[str, str]
+    ) -> list[dict[str, float]]:
+        graded = not self.children or candidate == SEED
+        return [
+            scores if graded and row != UNGRADED else {}
+            for row, scores in zip(
+                batch, super().objectives(batch, candidate), strict=True
+            )
+        ]
 
 
 def _text(candidate: Mapping[str, str]) -> str:
@@ -132,19 +156,40 @@ def adapter() -> KeywordAdapter:
 
 
 @pytest.fixture
+def ungraded_valset() -> list[Row]:
+    return [EMERGENCY, UNGRADED, ALPHA, BETA]
+
+
+@pytest.fixture
+def ungraded_adapter() -> UngradedAdapter:
+    return UngradedAdapter()
+
+
+@pytest.fixture
+def ungraded_children_adapter() -> UngradedAdapter:
+    return UngradedAdapter(children=True)
+
+
+@pytest.fixture
 def logger() -> RecordingLogger:
     return RecordingLogger()
 
 
 @pytest.fixture
 def optimize(adapter: KeywordAdapter, logger: RecordingLogger) -> Callable[..., Any]:
-    def run(criterion: Any, trainset: list[Row], **options: Any) -> Any:
+    def run(
+        criterion: Any,
+        trainset: list[Row],
+        valset: list[Row] | None = None,
+        scorer: KeywordAdapter | None = None,
+        **options: Any,
+    ) -> Any:
         proposer = ScriptedProposer()
         return gepa.optimize(
-            seed_candidate={"prompt": "emergency"},
+            seed_candidate=SEED,
             trainset=trainset,
-            valset=[EMERGENCY, ALPHA, BETA],
-            adapter=adapter,
+            valset=valset if valset is not None else [EMERGENCY, ALPHA, BETA],
+            adapter=scorer if scorer is not None else adapter,
             custom_candidate_proposer=proposer,
             reflection_minibatch_size=len(trainset),
             acceptance_criterion=criterion,

@@ -57,9 +57,11 @@ gepa-guard supports Python 3.11 to 3.15 and gepa 0.1.4 or later.
 
 Your gepa adapter must return `objective_scores` in its `EvaluationBatch`.
 This is a list with one mapping per row. Give each protected check a score of
-`1.0` (pass) or `0.0` (fail) on the rows that test it. Give `None` when a row
-tests the check but has no score, for example after an error. Rows that do not
-test a check can leave it out.
+`1.0` (pass) or `0.0` (fail) on the rows that test it. Leave a check out of a
+row when the row does not test it, or when the row has no score for it, for
+example after an error. The guard also reads `None` as no score, but gepa
+0.1.4 stops the run when a `valset` score is `None`. Leave the check out
+instead.
 
 The following example protects an `emergency` check in the minibatch.
 `seed`, `trainset`, `valset`, `adapter` and `reflection_lm` are your usual
@@ -154,9 +156,10 @@ fails rejects the proposal.
 4. **Floor**: the candidate must keep every protected pass of the seed on the
    floor rows, when a floor is given.
 
-A missing score never counts as a pass. When the candidate has a `None` score
-for a protected pass of its parent, or of the seed on the floor, and has no
-regression, the proposal is *unverifiable* and is rejected.
+A missing score never counts as a pass. When the candidate has no score for a
+protected pass of its parent, or of the seed on the floor, and has no
+regression, the proposal is *unverifiable* and is rejected. A check that is
+left out or is `None` has no score.
 
 After a minibatch rejection, the guard still asks the base criterion. The
 answer does not change the decision. It only counts the rejections that

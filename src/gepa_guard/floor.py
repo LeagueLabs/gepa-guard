@@ -31,8 +31,8 @@ class Evaluator(Protocol):
         -------
         sequence of mapping of str to float or None
             One mapping of objective name to score per row, in the order of
-            `rows`. A protected score is 0, 1 or None. None means that the row
-            tests the check but has no score, for example after an error.
+            `rows`. A protected score is 0, 1 or None. A check that is left
+            out or is None has no score, for example after an error.
         """
 
 
@@ -248,7 +248,7 @@ class ProtectedFloor:
         known : mapping of hashable to mapping of str to float or None, optional
             Objective scores of the candidate, keyed by gepa data id. The floor
             uses them for its rows with the same id. It scores a row when a
-            known protected score of the row is None.
+            known protected score of the row is left out or is None.
 
         Returns
         -------

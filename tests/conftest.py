@@ -238,7 +238,11 @@ def table() -> dict[str, dict[str, dict[str, float | None]]]:
             "e2": {"emergency": 0.0},
             "x1": {"encoding": 1.0},
         },
-        "breaks-x1": {"e1": {"emergency": 1.0}, "e2": {"emergency": 1.0}, "x1": {}},
+        "breaks-x1": {
+            "e1": {"emergency": 1.0},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 0.0},
+        },
         "breaks-all": {
             "e1": {"emergency": 0.0},
             "e2": {"emergency": 0.0},
@@ -266,6 +270,11 @@ def table() -> dict[str, dict[str, dict[str, float | None]]]:
         },
         "unscored-e1": {
             "e1": {"emergency": None},
+            "e2": {"emergency": 1.0},
+            "x1": {"encoding": 1.0},
+        },
+        "missing-e1": {
+            "e1": {},
             "e2": {"emergency": 1.0},
             "x1": {"encoding": 1.0},
         },
@@ -302,7 +311,7 @@ def two_check_model() -> TableModel:
     return TableModel(
         {
             "seed": {"m1": {"emergency": 1.0, "encoding": 1.0}},
-            "breaks-both": {"m1": {}},
+            "breaks-both": {"m1": {"emergency": 0.0, "encoding": 0.0}},
         }
     )
 

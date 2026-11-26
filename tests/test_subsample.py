@@ -64,11 +64,12 @@ class TestRegressions:
     ) -> None:
         assert check.inspect(make_proposal([before], [after])).clean
 
-    @pytest.mark.parametrize("after", [{}, {"emergency": 0.0}])
-    def test_missing_or_lower_score_regresses(
-        self, check: SubsampleCheck, make_proposal: Any, after: dict[str, float]
+    def test_lower_score_regresses(
+        self, check: SubsampleCheck, make_proposal: Any
     ) -> None:
-        finding = check.inspect(make_proposal([{"emergency": 1.0}], [after]))
+        finding = check.inspect(
+            make_proposal([{"emergency": 1.0}], [{"emergency": 0.0}])
+        )
         assert finding.regressions == (Regression(0, "emergency"),)
 
     def test_records_the_data_id(
@@ -93,7 +94,7 @@ class TestRegressions:
     def test_reports_every_check(self, make_proposal: Any) -> None:
         both = {"emergency": 1.0, "encoding": 1.0}
         finding = SubsampleCheck(("emergency", "encoding")).inspect(
-            make_proposal([both], [{}])
+            make_proposal([both], [{"emergency": 0.0, "encoding": 0.0}])
         )
         assert [r.check for r in finding.regressions] == ["emergency", "encoding"]
 
@@ -172,11 +173,18 @@ class TestUnverifiable:
         assert check.inspect(minimal_proposal).problem is not None
 
 
+UNSCORED = [
+    pytest.param({"emergency": None}, id="none"),
+    pytest.param({}, id="missing"),
+]
+
+
 class TestUnscored:
+    @pytest.mark.parametrize("unscored", UNSCORED)
     def test_unscored_parent_pass_is_unverifiable(
-        self, check: SubsampleCheck, make_proposal: Any
+        self, check: SubsampleCheck, make_proposal: Any, unscored: dict[str, Any]
     ) -> None:
-        proposal = make_proposal([{"emergency": 1.0}], [{"emergency": None}])
+        proposal = make_proposal([{"emergency": 1.0}], [unscored])
         expected = "no score for 'emergency' at minibatch row 0"
         assert check.inspect(proposal).problem == expected
 
@@ -193,18 +201,20 @@ class TestUnscored:
         proposal = make_proposal([{"emergency": None}], [{"emergency": 0.0}])
         assert check.inspect(proposal).clean
 
+    @pytest.mark.parametrize("unscored", UNSCORED)
     def test_regression_takes_precedence(
-        self, check: SubsampleCheck, regressed_proposal: Any
+        self, check: SubsampleCheck, regressed_proposal: Any, unscored: dict[str, Any]
     ) -> None:
-        regressed_proposal.eval_after.objective_scores[0] = {"emergency": None}
+        regressed_proposal.eval_after.objective_scores[0] = unscored
         finding = check.inspect(regressed_proposal)
         assert (finding.problem, finding.regressions) == (
             None,
             (Regression(1, "emergency"),),
         )
 
+    @pytest.mark.parametrize("unscored", UNSCORED)
     def test_unscored_pass_is_not_checked(
-        self, check: SubsampleCheck, regressed_proposal: Any
+        self, check: SubsampleCheck, regressed_proposal: Any, unscored: dict[str, Any]
     ) -> None:
-        regressed_proposal.eval_after.objective_scores[0] = {"emergency": None}
+        regressed_proposal.eval_after.objective_scores[0] = unscored
         assert check.inspect(regressed_proposal).checked == Counter(emergency=1)
