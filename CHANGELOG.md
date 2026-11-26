@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0a2
+
 * Ran CodeQL on each change and signed the release files with sigstore (PR #5)
 * Added `measure_scores` and row `ids` to the floor to reuse known scores (PR #4)
 * Treated a `None` protected score as not scored, never as a pass, and added `UnscoredCheckError` (PR #3)
