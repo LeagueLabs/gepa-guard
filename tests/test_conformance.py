@@ -58,7 +58,7 @@ CASES = [
     case("lost_then_invalid", [PASS, PASS], [FAIL, {"emergency": math.nan}], False),
 ]
 
-DIFFERENT_KIND = {"lost_then_invalid", "pass_lowered"}
+DIFFERENT_KIND = {"lost_then_invalid", "pass_lowered", "pass_missing"}
 SAME_KIND = [case for case in CASES if case.id not in DIFFERENT_KIND]
 
 NON_BINARY = [
@@ -135,13 +135,14 @@ class TestDifferencesFromGepa:
         rule = upstream(base=ImprovementOrEqualAcceptance(), protected=PROTECTED)
         assert rule.should_accept(proposal(before, after), None) is True
 
-    def test_lowered_pass_is_unverifiable_here_and_a_regression_in_gepa(
-        self, upstream: Any
+    @pytest.mark.parametrize("after", [{"emergency": 0.99}, {}])
+    def test_pass_is_unverifiable_here_and_a_regression_in_gepa(
+        self, upstream: Any, after: dict[str, float]
     ) -> None:
-        lowered = proposal([PASS], [{"emergency": 0.99}])
+        changed = proposal([PASS], [after])
         ours = guard()
-        ours.should_accept(lowered, None)
+        ours.should_accept(changed, None)
         rule = upstream(base=ImprovementOrEqualAcceptance(), protected=PROTECTED)
-        rule.should_accept(lowered, None)
+        rule.should_accept(changed, None)
         assert ours.stats.vetoed_unverifiable == 1
-        assert "regressed" in rule.reject_reason(lowered, None)
+        assert "regressed" in rule.reject_reason(changed, None)

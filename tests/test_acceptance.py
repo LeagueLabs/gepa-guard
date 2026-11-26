@@ -163,10 +163,11 @@ class TestShouldAccept:
         assert (guard.stats.vetoed_floor, guard.stats.regressed["emergency"]) == (1, 1)
         assert guard.stats.overrode_base == 1
 
+    @pytest.mark.parametrize("text", ["unscored-e1", "missing-e1"])
     def test_unscored_floor_case_is_unverifiable(
-        self, guard: GuardedAcceptance, make_proposal: Any
+        self, guard: GuardedAcceptance, make_proposal: Any, text: str
     ) -> None:
-        proposal = make_proposal([{}], [{}], text="unscored-e1")
+        proposal = make_proposal([{}], [{}], text=text)
         assert not guard.should_accept(proposal, STATE)
         assert (guard.stats.vetoed_unverifiable, guard.stats.vetoed_floor) == (1, 0)
         expected = "could not be verified (no score for 'emergency' at floor row 0)"
@@ -396,10 +397,15 @@ class TestReusedScores:
         assert id_guard.should_accept(proposal, STATE)
         assert model.scored[3:] == ["e1", "e2", "x1"]
 
+    @pytest.mark.parametrize("unscored", [{"emergency": None}, {}])
     def test_scores_a_row_the_minibatch_left_unscored(
-        self, id_guard: GuardedAcceptance, make_proposal: Any, model: Any
+        self,
+        id_guard: GuardedAcceptance,
+        make_proposal: Any,
+        model: Any,
+        unscored: dict[str, Any],
     ) -> None:
-        proposal = make_proposal([{"emergency": 0.0}], [{"emergency": None}])
+        proposal = make_proposal([{"emergency": 0.0}], [unscored])
         proposal.subsample_indices = [10]
         assert id_guard.should_accept(proposal, STATE)
         assert model.scored[3:] == ["e1", "e2", "x1"]

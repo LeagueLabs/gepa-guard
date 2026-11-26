@@ -71,7 +71,7 @@ def is_binary(score: Any) -> bool:
 
 
 def is_unscored(objectives: Mapping[str, Any], name: str) -> bool:
-    """Return whether a row tests a protected check but has no score for it.
+    """Return whether a row has no score for a protected check.
 
     Parameters
     ----------
@@ -83,9 +83,9 @@ def is_unscored(objectives: Mapping[str, Any], name: str) -> bool:
     Returns
     -------
     bool
-        True when `name` is in `objectives` with the value None.
+        True when `name` is not in `objectives` or has the value None.
     """
-    return name in objectives and objectives[name] is None
+    return objectives.get(name) is None
 
 
 def is_score(score: Any) -> bool:

@@ -39,11 +39,11 @@ class SubsampleCheck:
     """Compare a parent and its candidate on the protected objectives of a minibatch.
 
     A protected objective passes only at exactly 1.0. A parent pass that the
-    candidate does not keep is a regression. A score of None means that the
-    row tests the check but has no score. Proposals whose evaluations are
-    missing or misaligned, or hold a protected score that is not 0, 1 or
-    None, cannot be checked. A proposal without regressions also cannot be
-    checked when the candidate has no score for a pass of its parent.
+    candidate does not keep is a regression. A check that is left out or is
+    None has no score. Proposals whose evaluations are missing or misaligned,
+    or hold a protected score that is not 0, 1 or None, cannot be checked. A
+    proposal without regressions also cannot be checked when the candidate
+    has no score for a pass of its parent.
 
     Parameters
     ----------

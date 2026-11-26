@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from gepa_guard._scores import is_binary, is_pass, protected_names
+from gepa_guard._scores import is_binary, is_pass, is_unscored, protected_names
 
 
 class TestProtectedNames:
@@ -63,3 +63,20 @@ class TestIsBinary:
     )
     def test_accepts_only_zero_and_one(self, score: object, expected: bool) -> None:
         assert is_binary(score) is expected
+
+
+class TestIsUnscored:
+    @pytest.mark.parametrize(
+        ("objectives", "expected"),
+        [
+            ({"emergency": None}, True),
+            ({}, True),
+            ({"encoding": 1.0}, True),
+            ({"emergency": 0.0}, False),
+            ({"emergency": 1.0}, False),
+        ],
+    )
+    def test_none_or_missing_is_unscored(
+        self, objectives: dict[str, Any], expected: bool
+    ) -> None:
+        assert is_unscored(objectives, "emergency") is expected

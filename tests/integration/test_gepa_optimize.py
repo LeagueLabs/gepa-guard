@@ -153,6 +153,28 @@ class TestReusedFloorScores:
         assert keeps_emergency(optimize(guard(floor), unprotected_rows))
 
 
+class TestUngradedRows:
+    def test_runs_with_an_ungraded_valset_row(
+        self,
+        optimize: Optimize,
+        all_rows: list[Any],
+        ungraded_valset: list[Any],
+        ungraded_adapter: Any,
+    ) -> None:
+        result = optimize(guard(), all_rows, ungraded_valset, ungraded_adapter)
+        assert keeps_emergency(result)
+        assert len(result.candidates) > 1
+
+    def test_ungraded_child_is_unverifiable(
+        self, optimize: Optimize, all_rows: list[Any], ungraded_children_adapter: Any
+    ) -> None:
+        criterion = guard()
+        result = optimize(criterion, all_rows, scorer=ungraded_children_adapter)
+        assert result.candidates == [{"prompt": "emergency"}]
+        stats = criterion.stats
+        assert stats.vetoed_unverifiable == stats.proposals > 0
+
+
 class TestMerges:
     def test_unguarded_run_accepts_a_merge(
         self, optimize_with_merges: Optimize

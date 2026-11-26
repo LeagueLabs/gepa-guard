@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Treated a protected check left out of a row as not scored, the same as `None`, for gepa 0.1.4 (PR #7)
+
 ## 0.1.0a2
 
 * Ran CodeQL on each change and signed the release files with sigstore (PR #5)

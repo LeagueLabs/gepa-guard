@@ -50,8 +50,8 @@ class GuardedAcceptance:
     scores of 0, 1 or None. The candidate must keep every protected pass of
     its parent in the minibatch. The base criterion must accept. The candidate
     must hold the floor, when one is given. The first check that fails rejects
-    the candidate. A score of None means that a row tests a check but has no
-    score. A missing score for a pass of the parent or the reference, with no
+    the candidate. A check that is left out or is None has no score. A
+    missing score for a pass of the parent or the reference, with no
     regression, makes the proposal unverifiable. After a minibatch veto, the
     guard still asks the base criterion, only to count in `stats` the vetoes
     that override it. Calls from several threads run one at a time.
